@@ -1,3 +1,7 @@
+---
+name: datagol-google-connector
+description: Google-specific connector implementation for DataGOL-generated apps — Gmail and Calendar. Triggered by "build a gmail connector", "connect google", "sync my inbox", "build a google calendar integration", "sync my calendar", "build a google integration". Layers on top of `datagol-connector` (parent), supplying the Gmail and Calendar workbook schemas, OAuth scopes, backfill logic (Gmail `messages.list` with `newer_than:30d`; Calendar `events.list` with `timeMin`), polling logic (Gmail `history.list`; Calendar `events.list` with `syncToken` + 410 fallback), MIME decoding, and the Google API client wrappers used in the generated app. Drive and Microsoft are out of scope — those are separate child skills.
+---
 
 # DataGOL Google Connector — Gmail + Calendar
 

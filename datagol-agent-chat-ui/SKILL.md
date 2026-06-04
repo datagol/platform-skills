@@ -5,7 +5,40 @@ description: How to generate a Vite + React chat UI that streams from a DataGOL 
 
 # Agent Chat UI Generation
 
+> **Runtime skill — DataGOL access goes through the app's API.** The code this
+> skill scaffolds **ships and runs in the generated app**, so it is **runtime**:
+> client → `/api/*` → Express → DataGOL (token + `x-appid` server-side only). The
+> browser must never call `*.datagol.ai` or hold the service token. Conversation
+> creation and message **streaming are proxied through the Express API** (the
+> server holds the token and forwards/relays the SSE). Where samples below still
+> call DataGOL from the client, move that call into `server/` and have the client
+> hit `/api/*`. See `datagol-app-development` §Build-time vs runtime. *(Code
+> samples here predate the single-port migration — apply the topology.)*
+
 Use this skill when the user asks for a "chatbot website", "chat app", "frontend for my agent", "interface to talk to my agent", or similar. It pairs naturally with `datagol-create-agent`: first create the agent on DataGOL, then generate a UI that invokes it.
+
+## Single-port shape (conversation + streaming move behind the API)
+
+Under `datagol-app-development` the chat app has an Express `server/`, so the
+agent calls go **through the app's own API** — the browser never calls
+`*.datagol.ai` or holds the service token:
+
+- **Create conversation:** client `POST /api/chat/conversations` → Express calls
+  DataGOL `POST /ai/api/v2/conversations` (service token + `x-appid`, server-side).
+- **Stream a turn:** client `POST /api/chat/stream` → Express calls the DataGOL
+  streaming host and **relays the SSE back to the client** (pipe the upstream
+  `text/event-stream` straight through, or re-emit per event). The **parser
+  rules below are unchanged** — they just run wherever you parse: relay raw
+  frames and parse in the client, or parse server-side and emit clean events.
+- The `AGENT_ID`, token, `x-appid`, and `DATAGOL_AI_URL` all live in **server
+  env**; the client only knows `/api/chat/*`.
+
+> The detailed `src/lib/agent.ts` / `src/config.ts` code below shows the
+> **call + parser shape**. Under single-port, the `fetch(DATAGOL_AI_URL …)`
+> calls live in `server/src/routes/chat.ts`; the React UI (`App.tsx`, the
+> markdown/HTML renderers, the streaming reducer) stays client-side but reads
+> from `/api/chat/stream`. Keep the `content`-not-`text` rule and the mandatory
+> end-to-end verification — they apply to the server relay too.
 
 > **Prerequisite: run `datagol-interview` first.** The user-management answer
 > (mandatory question §2) decides whether this chat app shows a sign-in
@@ -140,11 +173,23 @@ Content-Type: application/json
 }
 ```
 
-Response is **Server-Sent Events** (`text/event-stream`). The wire format:
+Response is an event stream (`text/event-stream`), but the production host
+frames it as **line-delimited JSON (NDJSON)**, NOT classic `\n\n`-separated SSE
+records. The wire format:
 
-- **Records are separated by blank lines** (`\n\n`).
-- **Comment lines** start with `:` (e.g. `:heartbeat`, `:keep-alive`). Skip them.
+- **Each payload object is on its own line, terminated by a single `\n`.**
+  Consecutive `text` deltas arrive on adjacent single-`\n` lines with **no blank
+  line between them**. **⛔ Do NOT split the buffer on `\n\n`** — that lumps a
+  whole run of deltas into one "record" and (with a first-line-only parser)
+  silently drops every delta after the first, leaving the chat blank/truncated
+  even though the stream is perfectly healthy. **Split on `\n` and parse every
+  line.**
+- **Blank lines** and **comment lines** (start with `:`, e.g. `:heartbeat`,
+  `:keep-alive`) may be interleaved. Skip them — never `JSON.parse` them.
 - **Payload lines** are JSON objects. They may appear with OR without a leading `data:` prefix — the parser must tolerate both. Strip `data:` if present, then `JSON.parse`.
+- **Flush the trailing buffer at stream end.** The final payload line may not
+  carry a trailing `\n`, so process whatever remains in the buffer after
+  `reader.read()` returns `done: true`, or you'll drop the last delta.
 
 Each payload object has the shape:
 
@@ -164,6 +209,15 @@ Each payload object has the shape:
 | any other | — | Ignore safely (forward-compat). Don't crash. |
 
 The stream has **no explicit `done` event** — completion is signalled by the HTTP response ending (`reader.read()` returns `done: true`).
+
+> ⚠️ **Assistant text lives in `content`, never `text`.** A text event is
+> `{ "response_type": "text", "content": "…" }` — read **`obj.content`**.
+> Reading `obj.text` / `event.text` yields `undefined`, so the chat renders
+> **blank** even though the stream is perfectly healthy (HTTP 200, events
+> flowing, build green). This is the single most common agent-UI bug — it
+> looks like a backend/auth failure but it's a parser field-name mistake. The
+> mandatory verification at the end of this skill exists specifically to catch
+> it (assert ≥ 1 text chunk is actually extracted).
 
 ### HTML rendering (charts / visualizations)
 
@@ -208,6 +262,10 @@ These are entity references, not hyperlinks. If you render markdown, intercept t
 
 Note in the trace above:
 - Payload lines have no `data:` prefix — the parser must not require one.
+- **In production, consecutive `text` deltas arrive on adjacent single-`\n`
+  lines with NO blank line between them** (the `:keep-alive` gaps shown here are
+  optional and host-dependent). Parse line-by-line (`split('\n')`); a `\n\n`
+  record parser silently drops every delta after the first.
 - `tool_call` precedes `subagent_task_end` for the same `tool_call_id`.
 - Text chunks can be very small (a phrase, a few words) — concatenate, don't render each as its own paragraph.
 
@@ -223,7 +281,7 @@ Always start with the POST to `/conversations`.
 - After (or alongside) `datagol_create_agent` — you have an `agentId` to wire in.
 - The user wants a chat surface for end users, not a CRUD editor.
 
-If the user wants a CRUD app instead, use `datagol-ui-generation`.
+If the user wants a CRUD app instead, use `datagol-app-development`.
 
 ## Tech Stack
 
@@ -258,7 +316,7 @@ The generated app uses `DATAGOL_SERVICE_TOKEN` directly from `src/config.ts` —
 
 ```typescript
 // src/lib/agent.ts  (config section)
-import { DATAGOL_BASE_URL, DATAGOL_AI_URL, DATAGOL_SERVICE_TOKEN } from './config';
+import { DATAGOL_BASE_URL, DATAGOL_AI_URL, DATAGOL_SERVICE_TOKEN, DATAGOL_APP_ID } from './config';
 
 export const AGENT_ID = '024c4a46-2d93-4330-8bda-5bb560ffea72'; // replace with real id
 
@@ -270,10 +328,12 @@ export const CONV_API   = `${DATAGOL_BASE_URL}/ai/api/v2/conversations`;
 // DATAGOL_BASE_URL — the test/prod hosts don't share a naming pattern.
 export const STREAM_API = `${DATAGOL_AI_URL}/ai/api/v2/messages/streaming`;
 
-// All agent API calls: x-auth-token with service token.
-// Works because the agent was created with x-auth-token (service account is owner).
+// All agent API calls: x-auth-token with service token, plus x-appid.
+// x-appid (DATAGOL_APP_ID) is REQUIRED on every DataGOL request — workbook,
+// agent, AND the streaming AI host — see datagol-app-auth. Omitting it on the
+// agent/stream calls is a common miss that the streaming host rejects.
 export function headers() {
-  return { 'x-auth-token': DATAGOL_SERVICE_TOKEN, 'Content-Type': 'application/json' };
+  return { 'x-auth-token': DATAGOL_SERVICE_TOKEN, 'x-appid': DATAGOL_APP_ID, 'Content-Type': 'application/json' };
 }
 ```
 
@@ -281,7 +341,7 @@ export function headers() {
 
 ```typescript
 // src/lib/agent.ts
-import { STREAM_API, CONV_API, AGENT_ID, DATAGOL_SERVICE_TOKEN } from './config'
+import { STREAM_API, CONV_API, AGENT_ID, DATAGOL_SERVICE_TOKEN, DATAGOL_APP_ID } from './config'
 
 export type StreamEvent =
   | { kind: 'delta'; text: string }
@@ -291,9 +351,11 @@ export type StreamEvent =
   | { kind: 'done' }
   | { kind: 'error'; message: string }
 
-// All agent API calls use x-auth-token with the service token.
+// All agent API calls use x-auth-token with the service token, plus x-appid
+// (DATAGOL_APP_ID) — required on EVERY DataGOL request including the streaming
+// AI host. See datagol-app-auth §x-appid.
 function headers() {
-  return { 'x-auth-token': DATAGOL_SERVICE_TOKEN, 'Content-Type': 'application/json' };
+  return { 'x-auth-token': DATAGOL_SERVICE_TOKEN, 'x-appid': DATAGOL_APP_ID, 'Content-Type': 'application/json' };
 }
 
 /**
@@ -384,85 +446,85 @@ export async function* sendMessage(
   const decoder = new TextDecoder()
   let buffer = ''
 
+  // Parse ONE line of the stream and yield any event it produces. The host
+  // emits line-delimited JSON (one payload object per single-`\n` line), so we
+  // parse EVERY non-empty, non-comment line — never split on `\n\n` and never
+  // `break` after the first line (that drops consecutive text deltas).
+  const handleLine = function* (rawLine: string): Generator<StreamEvent> {
+    const line = rawLine.trim()
+    if (!line) return
+    if (line.startsWith(':')) return            // comment / heartbeat
+    // Payload lines are bare JSON without a `data:` prefix, but we strip the
+    // prefix if present so the parser also handles standard SSE servers.
+    const payload = line.startsWith('data:') ? line.slice(5).trim() : line
+    if (!payload) return
+
+    // Wire format (verified):
+    //   { "content": "...",     "response_type": "text",                "metadata": null }
+    //   { "content": 15892,     "response_type": "message_id",          "metadata": null }
+    //   { "content": { action, input, tool_call_id },
+    //                           "response_type": "tool_call",           "metadata": null }
+    //   { "content": { tool_call_id, tool_response: [{ type, text }] },
+    //                           "response_type": "subagent_task_end",   "metadata": null }
+    let obj: { content?: unknown; response_type?: string }
+    try { obj = JSON.parse(payload) }
+    catch { return }
+
+    switch (obj.response_type) {
+      case 'text':
+        if (typeof obj.content === 'string' && obj.content.length > 0) {
+          yield { kind: 'delta', text: obj.content }
+        }
+        break
+      case 'html':
+        if (typeof obj.content === 'string' && obj.content.length > 0) {
+          yield { kind: 'html', html: obj.content }
+        }
+        break
+      case 'tool_call': {
+        const c = obj.content as { action?: string; input?: unknown; tool_call_id?: string } | undefined
+        if (c?.tool_call_id && c?.action) {
+          yield { kind: 'tool_start', toolCallId: c.tool_call_id, action: c.action, input: c.input }
+        }
+        break
+      }
+      case 'subagent_task_end': {
+        const c = obj.content as {
+          tool_call_id?: string
+          tool_response?: Array<{ type?: string; text?: string }>
+        } | undefined
+        const id = c?.tool_call_id
+        const text = c?.tool_response?.[0]?.text
+        if (id && typeof text === 'string') {
+          // tool_response[0].text is itself JSON-encoded; parse it again.
+          // If parsing fails, surface the raw string so the UI can still display it.
+          let result: unknown
+          try { result = JSON.parse(text) }
+          catch { result = text }
+          yield { kind: 'tool_end', toolCallId: id, result }
+        }
+        break
+      }
+      case 'message_id':
+        // Server-assigned message id. Currently unused.
+        break
+      default:
+        // Unknown response_type — ignore safely (forward-compat).
+        break
+    }
+  }
+
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
     buffer += decoder.decode(value, { stream: true })
-
-    // Records are separated by blank lines.
-    const records = buffer.split('\n\n')
-    buffer = records.pop() ?? ''
-
-    for (const record of records) {
-      // A record can have multiple lines (e.g. a comment + a payload line).
-      // Pull out the first non-comment payload line. The DataGOL stream emits
-      // payload lines as bare JSON without a `data:` prefix, but we strip the
-      // prefix if present so the parser also handles standard SSE servers.
-      let payload: string | null = null
-      for (const rawLine of record.split('\n')) {
-        const line = rawLine.trim()
-        if (!line) continue
-        if (line.startsWith(':')) continue        // comment / heartbeat
-        payload = line.startsWith('data:') ? line.slice(5).trim() : line
-        break
-      }
-      if (!payload) continue
-
-      // Wire format (verified):
-      //   { "content": "...",     "response_type": "text",                "metadata": null }
-      //   { "content": 15892,     "response_type": "message_id",          "metadata": null }
-      //   { "content": { action, input, tool_call_id },
-      //                           "response_type": "tool_call",           "metadata": null }
-      //   { "content": { tool_call_id, tool_response: [{ type, text }] },
-      //                           "response_type": "subagent_task_end",   "metadata": null }
-      let obj: { content?: unknown; response_type?: string }
-      try { obj = JSON.parse(payload) }
-      catch { continue }
-
-      switch (obj.response_type) {
-        case 'text':
-          if (typeof obj.content === 'string' && obj.content.length > 0) {
-            yield { kind: 'delta', text: obj.content }
-          }
-          break
-        case 'html':
-          if (typeof obj.content === 'string' && obj.content.length > 0) {
-            yield { kind: 'html', html: obj.content }
-          }
-          break
-        case 'tool_call': {
-          const c = obj.content as { action?: string; input?: unknown; tool_call_id?: string } | undefined
-          if (c?.tool_call_id && c?.action) {
-            yield { kind: 'tool_start', toolCallId: c.tool_call_id, action: c.action, input: c.input }
-          }
-          break
-        }
-        case 'subagent_task_end': {
-          const c = obj.content as {
-            tool_call_id?: string
-            tool_response?: Array<{ type?: string; text?: string }>
-          } | undefined
-          const id = c?.tool_call_id
-          const text = c?.tool_response?.[0]?.text
-          if (id && typeof text === 'string') {
-            // tool_response[0].text is itself JSON-encoded; parse it again.
-            // If parsing fails, surface the raw string so the UI can still display it.
-            let result: unknown
-            try { result = JSON.parse(text) }
-            catch { result = text }
-            yield { kind: 'tool_end', toolCallId: id, result }
-          }
-          break
-        }
-        case 'message_id':
-          // Server-assigned message id. Currently unused.
-          break
-        default:
-          // Unknown response_type — ignore safely (forward-compat).
-          break
-      }
-    }
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''              // keep the last (possibly partial) line
+    for (const line of lines) yield* handleLine(line)
   }
+  // Flush the final line — it may have no trailing `\n`, so it was never split out.
+  if (buffer.trim()) yield* handleLine(buffer)
+
   // No explicit `done` event — completion is signalled by HTTP stream end.
   yield { kind: 'done' }
 }
@@ -891,3 +953,45 @@ After writing, tell the user:
   Codex preview iframe) and reused from `localStorage` on subsequent loads —
   no manual paste required.
 - Click **New chat** to reset the conversation thread.
+
+## Verification — *MANDATORY before declaring done*
+
+A green `tsc`/`vite build` is **not** proof the agent UI works. Exercise the
+real agent path with the **same service token the app uses**, and fix before
+reporting completion. The classic failure is a healthy stream (HTTP 200, events
+flowing) that renders **blank** because the parser read the wrong field — only
+step 4 catches it.
+
+1. **Agent permission grant.** The service account needs `CREATOR`
+   element-permission on the custom agent, or every conversation call returns
+   `400 "User does not have access to the custom agent"`. Grant it by
+   **service-account email** (not numeric `userId`) and **inspect the response
+   body** — the endpoint can return HTTP 200 with `successCount: 0` and a
+   populated `failures[]`. See `datagol-create-agent` §"Grant the service
+   account access to the agent". Assert `successCount > 0` (or non-empty
+   `successfulOperations[]`).
+2. **Create a conversation** with `x-auth-token: DATAGOL_SERVICE_TOKEN` +
+   `x-appid: DATAGOL_APP_ID`. Assert HTTP **200** and a non-empty `id`.
+3. **Stream one message** to `${DATAGOL_AI_URL}/ai/api/v2/messages/streaming`
+   with the same headers. Assert HTTP **200**.
+4. **Parse the live stream** with the app's own parser and assert **≥ 1
+   visible `response_type: "text"` chunk** was extracted into rendered text.
+   A multi-line response must yield **multiple** deltas — if you get exactly one
+   short chunk from a long reply, the parser is splitting on `\n\n` and dropping
+   the rest (split on `\n` instead). Zero text chunks = the parser is reading
+   the wrong field (it must read `content`, not `text` — see the warning above).
+   Fix it; don't ship it.
+5. **TypeScript build passes** (`tsc` / `vite build`).
+
+Success looks like:
+
+```txt
+grant_successCount>=1
+conversation_http=200
+stream_http=200
+text_events>=1
+rendered=<non-empty assistant text>
+build=passed
+```
+
+If any step fails, fix it before telling the user the agent UI is done.

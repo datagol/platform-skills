@@ -110,6 +110,6 @@ quick to diagnose.
 - **`datagol-push-to-github`** — usually run first; pushes the source. Vercel can
   also deploy directly from a GitHub repo (no CLI needed) — mention this if
   the user prefers a connected workflow.
-- **`datagol-ui-generation`** — controls what gets generated (and thus deployed).
+- **`datagol-app-development`** — controls what gets generated (and thus deployed).
 - **`datagol-human-in-the-loop`** — `bash` is hard-gated; the user sees an approval
   card before the curl fires.

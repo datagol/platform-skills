@@ -169,36 +169,40 @@ list them so the user can correct before generation:
 
 ### 4. App / UI tech plan (if applicable)
 
-- Stack: Next.js 15+ + React 19+ + TypeScript
-- Routing: Next.js App Router; use `app/{route}/page.tsx`, `next/link`, and `next/navigation`
-- API/data layer: `lib/datagol.ts` with `dgFetch`, row CRUD helpers, schema helpers, date coercion, and write sanitization
-- Config/schema: `lib/config.ts` for DataGOL env/base URL/workspace/token; `lib/schema.ts` for workbook/table/column aliases and IDs
-- Components: reusable UI in `components/`; SVG icons in `components/Icons.tsx`; workbook/table shells as needed
-- Styling: `app/globals.css`, CSS variables, component-level styles, and inline styles where appropriate
-- Tables: native tables for simple CRUD; `@tanstack/react-table` only when workbook-grade sorting/filtering/column control is needed
-- Dev server: use `APP_PORT`, not raw `PORT`: `next dev -H 0.0.0.0 -p ${APP_PORT:-3000}`
-- Pages directory layout:
+Apps are **single-port full-stack** — see `datagol-app-development` (parent) and
+its children `datagol-app-frontend` / `datagol-app-backend`. State this shape:
+
+- Architecture: one Express (TS) process serves the built React client **and**
+  `/api/*` on one port / one container. Dev = Vite (5173) + Express (3001) with
+  Vite proxying `/api`. **Data layer is DataGOL workbooks — no SQL DB.**
+- **Data flow:** client → same-origin `/api/*` → Express → DataGOL REST. The
+  **client never calls DataGOL and never holds the service token**; the token +
+  `x-appid` live in **server env only**.
+- Stack: Vite + React 19 + TypeScript (`client/`); Express + TypeScript
+  (`server/`); npm workspaces monorepo.
+- Routing (client): React Router, **one route per entity** (`/contacts`,
+  `/contacts/:id`, …); wrap with `basename={import.meta.env.BASE_URL}` for the
+  preview. Routerless only for a single-purpose app.
+- Server data layer: `server/src/lib/datagol.ts` (`dgFetch` + token + `x-appid`
+  from `process.env`) wrapped behind typed `server/src/routes/<resource>.ts`
+  endpoints (row CRUD, schema, date coercion, write sanitization, where-clause
+  safety).
+- Client data layer: `client/src/lib/api.ts` — a thin `fetch('/api/...')`
+  wrapper, the only data entry point. No DataGOL URL/token in the client.
+- Theming: **light + dark mandatory** (CSS tokens + persisted toggle).
+- Tables: native for simple CRUD; `@tanstack/react-table` only when
+  workbook-grade sorting/filtering/column control is needed.
+- Monorepo layout:
   ```
-  app/
-    globals.css
-    layout.tsx
-    page.tsx
-    contacts/page.tsx
-    companies/page.tsx
-    deals/page.tsx
-  components/
-    Icons.tsx
-    Sidebar.tsx
-    Topbar.tsx
-    ui/
-  lib/
-    config.ts
-    schema.ts
-    datagol.ts
-    utils.ts
+  package.json            # workspaces: [client, server]
+  Dockerfile              # multi-stage, single-port (EXPOSE 3001)
+  .env / .env.example     # server: DATAGOL_BASE_URL, DATAGOL_SERVICE_TOKEN, DATAGOL_APP_ID, table ids
+  client/  src/{main.tsx,App.tsx,pages/,components/,lib/api.ts}
+  server/  src/{index.ts (serving trick), config.ts, lib/datagol.ts, routes/<resource>.ts}
   ```
-- Token strategy: follow `datagol-app-auth` service-token pattern; centralize DataGOL token handling in `lib/config.ts` or env-backed config, never scattered in components
-- Loading/error UX: standard skeleton/banner described in section 2
+- Token strategy: service token + `x-appid` in **`server/.env`** (runtime-
+  injected, never baked, never in the client bundle) — per `datagol-app-auth`.
+- Loading/error UX: standard skeleton/banner described in section 2.
 
 ### 5. Custom Agent (if applicable)
 
@@ -279,6 +283,15 @@ For each API path the app references, hit it once with `curl` using the
 agent's bearer token (env: `DATAGOL_TOKEN`) — but only **read endpoints**.
 Never POST/PUT/DELETE during verification, you'll dirty the workspace.
 
+> **This check is the *agent* verifying DataGOL reachability at build time — it
+> correctly goes straight to `*.datagol.ai`.** That's different from the
+> *running app*, whose data flows client → `/api/*` → Express → DataGOL (the
+> browser never calls DataGOL). Build-time/info-gathering calls (schema
+> discovery, provisioning, this smoke-test) are direct; only the shipped app's
+> data access goes through the API. Don't reroute this smoke-test through
+> `/api/*`. Optionally, once the app's server is up, also `curl` its
+> `/api/<resource>` to confirm the proxy layer returns the same data.
+
 | Endpoint | Method | Expected | Status |
 |----------|--------|----------|--------|
 | `/noCo/api/v2/workspaces` | GET | 200 | ✓ |
@@ -298,7 +311,7 @@ The Vite dev server is already running on the sandbox port. Confirm:
   for `<script type="module" src="/src/main.tsx">` and the absence of
   `[plugin:vite:react-babel]` or `Failed to resolve` strings).
 - No dependency-resolution errors (would indicate a broken
-  `node_modules` symlink — see `datagol-ui-generation`'s "never run npm install"
+  `node_modules` symlink — see `datagol-app-development`'s "never run npm install"
   rule; if you see this, alert the user, don't try to fix with install).
 
 #### 9.5 Verification report
@@ -455,7 +468,7 @@ permission* and clean up after.
 - **`datagol-workbook-design`** — for choosing types, naming, and shape decisions
   *while building Section 3*.
 - **`datagol-create-links`** — for translating "X has many Y" into Section 3.3.
-- **`datagol-ui-generation`** — for fleshing out Section 4 (file layout, page code).
+- **`datagol-app-development`** — for fleshing out Section 4 (file layout, page code).
 - **`datagol-agent-chat-ui`** — for chat-app variants of Section 4.
 - **`datagol-create-agent`** — for Section 5 details (prompt, MCP wiring).
 - **`datagol-workbook-operations`** — for any non-schema operation (rows, AI columns)

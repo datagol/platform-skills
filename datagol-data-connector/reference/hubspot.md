@@ -194,4 +194,4 @@ You can now ask me to inspect its schema, query it, or publish a dataset to a wo
 - `datagol-data-connector` — shared registration mindset: one POST, no scaffolding by default.
 - `datagol-data-query` — use only after registration when the user asks to query/show data.
 - `datagol-data-publish` — use only when the user asks to save HubSpot data as a workbook.
-- `datagol-app-auth` and `datagol-ui-generation` — only relevant if the user explicitly asks to build an app/UI on top of HubSpot.
+- `datagol-app-auth` and `datagol-app-development` — only relevant if the user explicitly asks to build an app/UI on top of HubSpot.

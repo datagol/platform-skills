@@ -1,6 +1,6 @@
 ---
 name: datagol-image-to-ui
-description: When the user pastes or drops an image of a design (Figma export, mockup, screenshot of another site, hand-sketch, whiteboard photo, etc.) and asks the agent to build UI from it, treat the image as **authoritative design intent**. Triggered by "build this design", "match this mockup", "implement this screenshot", "make it look like this image", "build a page like this", "design like this", or *any* build / scaffold request where at least one image is attached. Reads the image, summarizes what it sees to the user, asks at most one clarifier if ambiguity is high, then scaffolds one page or component first, renders it for verification, and only then continues to the rest. Pairs with `datagol-ui-generation` (file structure + API wiring) and `datagol-frontend-design` (typography, motion, palette).
+description: When the user pastes or drops an image of a design (Figma export, mockup, screenshot of another site, hand-sketch, whiteboard photo, etc.) and asks the agent to build UI from it, treat the image as **authoritative design intent**. Triggered by "build this design", "match this mockup", "implement this screenshot", "make it look like this image", "build a page like this", "design like this", or *any* build / scaffold request where at least one image is attached. Reads the image, summarizes what it sees to the user, asks at most one clarifier if ambiguity is high, then scaffolds one page or component first, renders it for verification, and only then continues to the rest. Pairs with `datagol-app-development` (file structure + API wiring) and `datagol-frontend-design` (typography, motion, palette).
 ---
 
 # DataGOL Image-to-UI
@@ -25,7 +25,7 @@ This skill governs the *visual* contract. It does NOT replace `datagol-interview
 |---|---|
 | `datagol-image-to-ui` (this) | The *visual* contract — what the UI must look like |
 | `datagol-frontend-design` | The *aesthetic conventions* — typography stack, motion language, spacing grammar, palette discipline |
-| `datagol-ui-generation` | The *file scaffold + API wiring* — Next.js + React layout, App Router structure, and `lib/datagol.ts` data layer |
+| `datagol-app-development` | The *file scaffold + API wiring* — Next.js + React layout, App Router structure, and `lib/datagol.ts` data layer |
 | `datagol-interview` | Workspace target, auth model, data-model questions — still mandatory |
 | `datagol-detailed-plan` | The user-approved plan for anything non-trivial — still mandatory |
 
@@ -62,7 +62,7 @@ ONE question, not five. Skip this step entirely when the image is unambiguous. E
 
 Things that are NOT worth asking (decide them yourself):
 - Exact pixel values that the image already shows.
-- Whether to use Tailwind or inline styles (defer to host app conventions via `datagol-integrate`, or inline styles for a fresh sandbox per `datagol-ui-generation`).
+- Whether to use Tailwind or inline styles (defer to host app conventions via `datagol-integrate`, or inline styles for a fresh sandbox per `datagol-app-development`).
 - Whether to add hover states (yes, always — `datagol-frontend-design` covers this).
 
 ### 3. Build small, verify, expand
@@ -139,7 +139,7 @@ Same rendering discipline as elsewhere in the codex:
 
 ## Cross-references
 
-- **`datagol-ui-generation`** — file scaffold, API wiring, framework rules (Next.js + React for fresh apps; defer to host for grafted apps).
+- **`datagol-app-development`** — file scaffold, API wiring, framework rules (Next.js + React for fresh apps; defer to host for grafted apps).
 - **`datagol-frontend-design`** — typography stack, motion conventions, palette discipline, spatial composition. Apply these *within* the visual contract the image dictates.
 - **`datagol-interview`** — workspace + auth + data model. The image doesn't answer these; the interview does.
 - **`datagol-detailed-plan`** — required for non-trivial multi-page builds.

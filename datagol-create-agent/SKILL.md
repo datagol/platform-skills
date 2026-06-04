@@ -16,7 +16,7 @@ Use this when the user asks to "create an agent", "build a chatbot", "make an as
 
 ## When to Use
 
-- The user wants a published agent inside DataGOL (not a generated React app — that's the `datagol-ui-generation` skill).
+- The user wants a published agent inside DataGOL (not a generated React app — that's the `datagol-app-development` skill).
 - They want the agent to read/write specific workbooks (Contacts, Deals, etc.) via MCP.
 - They want **RAG over documents** — the agent should answer from PDFs/DOCX/etc. uploaded into a workspace. Use a `WORKSPACE_DOCUMENTS` connector (see "RAG: workspace document connectors" below).
 - They want web search, browser, or deep-research capabilities baked in.
@@ -204,7 +204,42 @@ curl -X POST "${DATAGOL_BASE_URL}/noCo/api/v2/elementPermissions/bulk" \
   }"
 ```
 
+> ⚠️ **The grant can return HTTP 200 but still fail — and `userId` is the usual culprit.** In some environments `elementPermissions/bulk` does not resolve the service account from its numeric `userId`: the call returns `200` but the response **body** reports the operation failed (no permission is actually written), and the app keeps getting `400 "User does not have access to the custom agent"`. **Don't trust the status code — inspect the body.** When the `userId` form fails this way, re-grant by service-account **email** instead, which resolves the service-account user correctly:
+>
+> ```bash
+> #   SERVICE_ACCOUNT_EMAIL = the service account's email
+> #                           (from POST /idp/api/v1/company/serviceAccount response, or
+> #                            datagol-app-auth Step A — same place SVC_ID came from)
+> curl -X POST "${DATAGOL_BASE_URL}/noCo/api/v2/elementPermissions/bulk" \
+>   -H "Authorization: Bearer ${DATAGOL_TOKEN}" \
+>   -H "Content-Type: application/json" \
+>   -d "{
+>     \"permissions\": [
+>       {
+>         \"elementId\":   \"${AGENT_ID}\",
+>         \"elementType\": \"CUSTOM_AGENT\",
+>         \"email\":       \"${SERVICE_ACCOUNT_EMAIL}\",
+>         \"permission\":  \"CREATOR\"
+>       }
+>     ]
+>   }"
+> ```
+
 After this returns 200, the generated app can use `x-auth-token: ${DATAGOL_SERVICE_TOKEN}` (the same token it uses for workbook calls) for **all** agent endpoints — conversations, streaming, fetching agent metadata. No user bearer needs to be baked into the app.
+
+**Verify the grant actually took — don't assume.** Because the grant call can lie (200 with a failure body, above), confirm by exercising the exact path the app uses: create a conversation with the **service token**, and check the agent reports the service account as `CREATOR`.
+
+```bash
+# Smoke-test with the SAME token the app uses (service token, x-auth-token):
+curl -s -o /dev/null -w "conversation_probe_status=%{http_code}\n" \
+  -X POST "${DATAGOL_BASE_URL}/ai/api/v2/conversations" \
+  -H "x-auth-token: ${DATAGOL_SERVICE_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"customAgentId\": \"${AGENT_ID}\", \"userId\": ${SERVICE_ACCOUNT_USER_ID}, \"name\": \"perm probe\"}"
+# Expect: conversation_probe_status=200   (403/400 → the grant didn't take; re-grant by email)
+```
+
+A healthy grant shows `conversation_probe_status=200` and the agent's `permissionOfUser` reads `CREATOR`. Only then is the agent safe to invoke from the generated app.
 
 > **Why `Authorization: Bearer ${DATAGOL_TOKEN}` and not the service token?** Element permissions are granted *by* the element's owner. The agent owner is the platform user (since `datagol_create_agent` runs under the user JWT), so the grant call must also be made under the user JWT. The service account can't grant itself permissions.
 

@@ -19,7 +19,7 @@ Run this skill **always** when the user's request includes any of:
   workspace, agent, workbook, schema, table, dashboard, page, form, or feature
 - "I want a / I need a / Help me make a …" anything that requires more than
   one modifying tool call
-- Any request that would land you in `datagol-workbook-design`, `datagol-ui-generation`,
+- Any request that would land you in `datagol-workbook-design`, `datagol-app-development`,
   `datagol-create-agent`, `datagol-agent-chat-ui`, or `datagol-create-links` — those skills assume
   the interview has already run
 
@@ -79,42 +79,46 @@ Other categories are picked situationally.
 - "What problem does this app solve?"
 - "Who will use it day-to-day?"
 
-### 2. Workspace target — *MANDATORY*
+### 2. Workspace target — *MANDATORY when data is needed*
 
-Every build that creates workbooks, agents, dashboards, or data sources lands in *some* DataGOL workspace. **Never pick or create one silently** — the user owns this decision because workspaces carry permissions, billing, and discoverability implications. Ask exactly this:
+**Never ask the user to paste a workspace UUID.** That's the worst possible question — UUIDs aren't memorable, and the user doesn't have one handy.
 
-> **Which DataGOL workspace should this go into?**
+Two paths:
+
+1. **No data backing needed** (pure-UI app, local state, calculator, todo with localStorage, kanban with React state, etc.) — skip workspace entirely. Don't call `datagol_get_workspace_schema`, don't create one, don't ask about it.
+
+2. **The build needs DataGOL data backing** — **ALWAYS** ask the user this *category* question **BEFORE invoking any workspace tool** (`datagol_create_workspace`, `datagol_get_workspace_schema`, `datagol_list_workspaces`). No exceptions. Even if the user said "build me a CRM with workbooks" and it's obvious data is needed, ask first; the user owns this decision because workspaces carry permissions, billing, and discoverability implications.
+
+   > **Should I create a new DataGOL workspace for this, or put it in an existing one?**
+   >
+   > - **New** — I'll create one called *"\<derived-name\>"* (e.g. *"Sales CRM"* for a CRM build, *"Task Management"* for a project tracker). Reply with a different name if you'd prefer.
+   > - **Existing** — I'll list your workspaces so you can pick by name.
+
+   **Wait for the user's reply** — do not pre-emptively call `datagol_create_workspace` in the same turn as asking. Only after they reply:
+   - **New** (with the proposed name, or any name they wrote) → call `datagol_create_workspace` with that name. Capture the returned `id` and use it for every subsequent tool call.
+   - **Existing** → call `datagol_list_workspaces`, show the names (not UUIDs), let the user pick by name, then look up the `id` from the list yourself.
+
+   Either way, the user never types a UUID — they pick by name or accept your proposal.
+
+### 3. Authentication model — *MANDATORY*
+
+**Knowing what kind of authentication the app uses is non-negotiable.** The architecture, the scaffold files, the API headers, and the provisioning tool calls all fork on this answer. Ask the question before any scaffolding tool fires; never infer, never default. The detailed-plan must restate the chosen mode in §1 Architecture.
+
+Ask exactly this:
+
+> **Which authentication model should the app use?**
 >
-> 1. **Existing workspace** — name the one to reuse. (You can call `datagol_list_workspaces` first and show the user the names so they don't have to remember.)
-> 2. **New workspace** — propose a sensible name from their intent (e.g. *"Sales CRM"* for a CRM build) and **wait for explicit confirmation** of that name before calling `datagol_create_workspace`.
+> 1. **No authentication — no login screen, public-facing apps or quick prototypes.** Everyone who opens the app uses a shared DataGOL service token under the hood; all visitors see the same data. Pick this for public-facing sites where there's no concept of a "user", or for quick prototypes where login is out of scope.
+> 2. **B2B / B2C app — the app owns its own user table.** Adds a sign-up + sign-in flow where the app's Express server verifies credentials (server-side hashing) against DataGOL Users + Roles workbooks and issues an **app bearer token** the client sends on every request; per-row ownership + roles are enforced server-side. DataGOL is reached with the service token (server-side only); app users are a separate identity store from DataGOL. Pick this for shipping a product to external users who don't have DataGOL accounts.
+> 3. **Internal app — DataGOL users log in.** A login form that takes a DataGOL email + password; the app's server authenticates against DataGOL's IDP and the signed-in user's **bearer token** is forwarded by the server on subsequent calls (no service account). **No signup button.** Everyone who uses the app must already be a DataGOL user in this company. Pick this for internal tools where the team already has DataGOL accounts.
 
-Capture the chosen workspace `id` (or the agreed name for a new one) and carry it into the plan. Section 1 (Architecture) of `datagol-detailed-plan` must spell it out: *"Target workspace: `<name>` (existing)"* or *"Target workspace: `<name>` (will create)"* — so the user can veto or rename at plan-approval time before any modifying tool runs.
+**Routing for the build phase** — wire the answer into the plan and into which skills the scaffold reads:
 
-**Never call `datagol_create_workspace` until you have the user's explicit "yes" on a specific name.** Even if the user said "build me a CRM" and you'd normally derive a workspace name from intent, propose it and wait. *"I'll create a workspace called 'Sales CRM' — sound good?"* gets you to the same place without surprising the user.
+- **Mode 1 (No auth)** → only `datagol-app-auth` runs. The service-token 3-call provisioning is mandatory; the token lives in the app's **server** env (single-port app).
+- **Mode 2 (B2B/B2C)** → `datagol-app-auth` (service token + workspace grants) PLUS `datagol-user-auth` (Users + Roles workbooks; server-side `/api/auth/login` → app bearer JWT; client sends the bearer; server uses the service token for DataGOL).
+- **Mode 3 (Internal / DataGOL login)** → `datagol-internal-app-auth` only. **No service account.** The app's **server** calls `/idp/api/v1/user/login`, captures the bearer from the `Authorization` response header, and returns it; the client sends that bearer to `/api/*` and the server **forwards** it to DataGOL.
 
-### 3. User management / auth model — *MANDATORY*
-
-Every app build needs an explicit answer here, because the architecture
-forks at this fork. Ask exactly this:
-
-> **Should the app have user accounts (login)?**
->
-> 1. **Yes, multi-user with login** — each user signs up / signs in and sees
->    only their own data. Adds a sign-up + sign-in flow, per-row ownership,
->    and a session/auth layer.
-> 2. **No, single-user demo** — no login. The whole app runs against one
->    shared DataGOL token; everyone who opens it sees the same data. Fastest
->    path; you can add auth later.
-> 3. **Other** — describe (e.g. "shared login for the team, no per-user
->    isolation", "SSO via Google", "view-only public, edit only for me").
-
-Hold the answer in the conversation; the `datagol-detailed-plan` skill will require
-it in Section 1 (Architecture). When the answer is **#1** (multi-user with
-login), the **`datagol-user-auth`** skill is the canonical implementation —
-workbook-backed users with PBKDF2-hashed passwords. Read it to understand
-the additional schema (Users workbook with `username`, `password_hash`,
-`salt`, `role`) and the additional pages (sign-in / sign-up) that need to
-appear in the plan.
+Hold the answer in the conversation; the `datagol-detailed-plan` skill will require it in Section 1 (Architecture). The mode must be stated as "Mode 1 / Mode 2 / Mode 3" (or by the friendly name above) so downstream skills can route deterministically.
 
 ### 4. Entities (data model)
 - "What kinds of records does it track?" (Contacts, Deals, Tasks, Orders, etc.)
@@ -152,14 +156,7 @@ appear in the plan.
 >
 > **User**: Sales pipeline.
 >
-> **Agent**: Got it. Before I start designing, where should this land —
-> a new DataGOL workspace I create for you (I'd suggest *"Sales CRM"*),
-> or an existing one I should reuse? I can list your existing workspaces
-> if helpful.
->
-> **User**: New one, that name's fine.
->
-> **Agent**: Perfect. Three core entities for a sales CRM: **Contacts**
+> **Agent**: Got it. Three core entities for a sales CRM: **Contacts**
 > (people), **Companies** (orgs), **Deals** (opportunities). Want me to keep
 > just those three, or add anything else like Tasks/Activities?
 >
@@ -199,7 +196,9 @@ appear in the plan.
 ❌ **Silent assumptions:** Building without asking when the user said "build
 me a CRM" with no other context. Ask first.
 
-❌ **Silently picking a workspace.** Even if the user's intent obviously implies a workspace name (*"Sales CRM"* from a CRM build), **propose the name and wait for explicit confirmation** before calling `datagol_create_workspace`. Don't include workspace creation in a tool-call batch that the user hasn't approved. The Section-2 question above is non-negotiable on every build.
+❌ **Asking the user to paste a workspace UUID.** Don't. Section 2: skip workspace for pure-UI builds, or ask the new-vs-existing *category* question and resolve the ID yourself (create new, or pick from `datagol_list_workspaces` by name).
+
+❌ **Picking the auth mode silently** (or defaulting to Mode 1) without the user's confirmed answer to §3. Knowing the auth mode is non-negotiable — every downstream skill (`datagol-app-auth`, `datagol-user-auth`, `datagol-internal-app-auth`, `datagol-app-development`) forks on it. If the answer isn't in the conversation, ask the question; do not infer from "internal-sounding" or "demo-sounding" project descriptions.
 
 ❌ **Skipping the interview because the user gave detail.** Detailed prose
 still has gaps. Acknowledge what they gave you, then ask the *unanswered*
@@ -217,11 +216,14 @@ question 1, don't re-ask it as question 4.
 
 ## Cross-References
 
+- **`datagol-app-auth`** — runs when §3 = Mode 1 or Mode 2. Provisions the service token; establishes the `x-auth-token` header pattern.
+- **`datagol-user-auth`** — runs when §3 = Mode 2. Adds the Users workbook + PBKDF2 sign-up/sign-in scaffold on top of `datagol-app-auth`.
+- **`datagol-internal-app-auth`** — runs when §3 = Mode 3. Replaces `datagol-app-auth`'s provisioning entirely; login form captures bearer from DataGOL IDP, no service token.
 - **`datagol-human-in-the-loop`** — after the interview's summary, the platform's
   hard gates kick in for `datagol_create_*` and `bash`.
 - **`datagol-workbook-design`** — once you know the entities, this skill tells you
   how to shape them.
 - **`datagol-create-links`** — for translating "X has many Y" into LINK columns.
-- **`datagol-ui-generation`** — for turning the data model into a CRUD UI.
+- **`datagol-app-development`** — for turning the data model into a CRUD UI. Its prerequisite block forks on the §3 auth mode.
 - **`datagol-create-agent`** + **`datagol-agent-chat-ui`** — if the interview reveals the
   user wants a conversational interface over the data.

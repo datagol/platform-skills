@@ -1,3 +1,7 @@
+---
+name: datagol-slack-connector
+description: Slack-specific connector implementation for DataGOL-generated apps — channels and messages. Triggered by "build a slack connector", "connect slack", "sync my slack", "build a slack integration", "index slack messages". Layers on top of `datagol-connector` (parent), supplying the Slack Messages + Slack Channels workbook schemas, OAuth scopes (channels:read, channels:history, groups:read, groups:history, users:read, team:read), backfill logic (conversations.list + conversations.history with oldest=now-30d), polling logic (per-channel oldest=last_ts), and the Slack Web API client used in the generated app. DMs are out of scope in v1.
+---
 
 # DataGOL Slack Connector — Channels + Messages
 
@@ -606,7 +610,7 @@ Styling follows the host app's convention via `datagol-integrate`. Don't introdu
 
 - **`datagol-connector`** — parent. Shared mechanics (workbook schema, OAuth handoff, polling loop, hard rules) all live there.
 - **`datagol-app-auth`** — service-token + env-switching foundations. Required before any DataGOL API call.
-- **`reference/google.md`** (sibling file in the same folder) — Same architectural pattern; useful as a structural reference.
+- **`datagol-google-connector`** — sibling. Same architectural pattern; useful as a structural reference.
 - **`datagol-workbook-operations`** — full reference for the workbook read/write APIs the `bulkInsertRows`, `updateRow`, etc. wrappers use.
 - **`datagol-integrate`** — when grafting the Connections page (or extending it with the Messaging section) into an existing user repo.
 - **`datagol-create-dashboard`** / **`datagol-create-agent`** — common downstream features once Slack data is in workbooks: build a dashboard over channel-message volume, or an agent that answers questions about decisions made in #engineering.

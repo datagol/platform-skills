@@ -1,3 +1,7 @@
+---
+name: datagol-postgres-connector
+description: Postgres-specific data-source registration. Triggered by "connect Postgres", "add a Postgres database", "wire up PostgreSQL", "register Postgres data source", or any phrasing that names Postgres / a Postgres-flavoured host (`*.rds.amazonaws.com` running Postgres, `*.postgres.database.azure.com`, `*.supabase.co`, Neon, Railway-Postgres, etc.). Layers on top of `datagol-data-connector` (parent), supplying the Postgres provider config (`driverName=org.postgresql.Driver`, `dataSourceProvider=postgresql`), the field set to ask for, defaults (port `5432`, schema `public`), and a `postgresql://` URL parser the agent runs in chat. Day-1 scope is **registration only**.
+---
 
 # DataGOL Postgres Connector
 
@@ -99,4 +103,4 @@ If parsing succeeds, echo the parsed values back to the user (with the password 
 - **`datagol-data-connector`** — parent. The shared mechanics (the API call, response handling, the *"Don't scaffold anything by default"* hard rule) live there.
 - **`datagol-data-query`** — sibling. Use when the user wants to run a SQL query against this Postgres source after it's registered.
 - **`datagol-data-publish`** — sibling. Use when the user wants the result of a SQL query saved as a workbook.
-- **`datagol-app-connector`** — Composio-backed integration for OAuth SaaS APIs. Different family — use that when the user wants to act on SaaS providers from a generated app, not ingest SQL data.
+- **`datagol-connector`** — the *other* connector parent (OAuth-based SaaS APIs). Different family, sister skill.

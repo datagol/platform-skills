@@ -64,4 +64,4 @@ You have access to these DataGOL tools:
 - `datagol_create_workbook` — create a new workbook with columns
 - `datagol_add_column` — add a column to an existing workbook
 
-Always call `datagol_get_workspace_schema` before generating a UI so you have the current schema.
+For pure-UI builds with local state, skip workspace tooling entirely — no workspace needed. For data-backed builds, the user is asked (per `datagol-interview` Section 2) to choose between a new workspace or an existing one (by name, never by UUID). Once you've resolved the workspace `id` from that answer — either by calling `datagol_create_workspace` (new) or by matching the picked name against `datagol_list_workspaces` (existing) — call `datagol_get_workspace_schema` with that id so you have the current shape before generating a UI.

@@ -7,7 +7,33 @@ description: After the agent finishes building (or substantially modifying) a ge
 
 The agent finishes a build, then verifies its own work. Two tiers — cheap stuff runs without asking; expensive stuff asks first.
 
-> **Why this skill exists.** *"I built it"* is not the same as *"it works"*. Without verification, the agent has been known to: emit code that doesn't compile, hard-code workbook IDs that don't exist, send `api.ts` request bodies in the wrong shape (missing `cellValues` wrapper, `port` as number not string), call `PATCH /rows/:id` instead of `PUT /rows`. Each is invisible until the user opens the preview and gets a blank page or a network 4xx. This skill closes that loop.
+> **Why this skill exists.** *"I built it"* is not the same as *"it works"*. Without verification, the agent has been known to: emit code that doesn't compile, hard-code workbook IDs that don't exist, send request bodies in the wrong shape (missing `cellValues` wrapper), call `PATCH /rows/:id` instead of `PUT /rows`. Each is invisible until the user opens the preview and gets a blank page or a network 4xx. This skill closes that loop.
+
+## ⛔ COMPLETION GATE — read first, non-negotiable
+
+**You may NOT tell the user the app is ready until the Tier 1 gate below has run
+THIS turn and every check PASSED, and you have pasted the evidence block.** This
+is a hard rule, not a suggestion.
+
+- **Forbidden phrases unless the evidence block is present and all-green:**
+  "it's ready", "the app is ready", "done", "all set", "you can use it now",
+  "it works", "go ahead and try it", "I've built/finished the app", "complete",
+  or any paraphrase that implies the app is usable. Saying any of these without a
+  passed, shown Tier 1 block is a **failure of this skill.**
+- **Evidence is mandatory.** Claims are not evidence. You must run the checks and
+  **paste the actual results** (HTTP status codes / exit codes / the block
+  below). "I verified it" without the block does not count.
+- **Any check fails or cannot run → you must NOT claim ready.** Either auto-fix
+  and re-run (per each check's protocol), or, if you can't, tell the user plainly
+  **what failed** and that the app is **not** ready — never paper over it.
+- **No skipping "to save time."** The gate is cheap (seconds). If the user
+  explicitly said "skip tests", you may skip — but then you must say *"not
+  verified this turn"*, NOT "ready".
+- **It ran this turn.** A pass from an earlier turn doesn't count after you've
+  written more files — re-run.
+
+The required evidence block (Tier 1 output format) and the exact checks are
+defined below. Produce that block before any completion statement.
 
 ## When to run
 
@@ -32,101 +58,175 @@ The agent finishes a build, then verifies its own work. Two tiers — cheap stuf
 
 ---
 
-## Tier 1 — Sanity checks (auto, ~5–10s, silent on pass)
+## ⚙️ Process model — the platform owns the server. NEVER hand-manage it.
 
-Run these three in sequence. Stop and self-heal on the first failure; once it passes, continue.
+The single-port app is **rebuilt and restarted for you by the platform** at the
+end of every turn. You do not — and must not — start, stop, or build the server
+yourself. Read this before you touch a terminal:
 
-### Check 1: TypeScript compiles
+- **On `agent_done` (end of each turn), the cli-server automatically runs
+  `npm install` + `npm run build` (client vite build + server tsc) and restarts
+  the Node process on the SAME, stable preview port.** There is **no HMR** for
+  single-port apps — the restart IS the reload.
+- **The running preview reflects the PREVIOUS turn's build, not your
+  uncommitted edits this turn.** Source edits you make now go live only after
+  the turn ends and the auto-rebuild runs. This is expected — do not
+  "work around" it.
+- **⛔ NEVER run `node server/dist/index.js`, `npm run dev`, `npm start`, or
+  `npm run build` followed by a manual launch, and NEVER `kill` the server
+  process.** Hand-spawning creates an **orphan process (parent PID 1)** that
+  races the platform's managed process, binds a stray port, and serves **stale
+  code** — the #1 cause of phantom "404 / hangs / works-when-I-curl-it-directly
+  but-not-in-preview" symptoms. If you see duplicate `server/dist/index.js`
+  processes for one app dir, an earlier turn hand-spawned one; that's a bug to
+  avoid, not to reproduce.
+- **Do NOT diagnose transport from a stale/orphan process.** If a POST appears
+  to "hang" or 404 through the preview, the cause is almost always (a) you're
+  hitting the pre-rebuild process mid-turn, or (b) an orphan you spawned — NOT
+  the proxy mishandling JSON bodies. **Never invent header-based / no-body
+  login workarounds** to dodge a phantom "JSON POST hangs" problem; standard
+  `POST /api/auth/login` with a JSON body is correct. Let the turn end, then
+  re-probe the managed preview.
+- **To verify live behavior, just probe the preview URL** (`$P/...` below). If
+  it's `502`/`503`, the managed rebuild is still running or just kicked off —
+  wait ~2s and retry. Do not "fix" a 502 by launching your own server.
+- **The only thing you may run for verification is the read-only `npm run
+  build` typecheck (Check 1) and `curl`/`node .datagol/ui-test.mjs` probes.**
+  Never a long-lived `listen`.
+
+## Tier 1 — the gate (single-port apps)
+
+Run **every** check in sequence through the app's preview URL (the same path a
+real user hits). Stop and self-heal on the first failure; re-run after a fix.
+**Probe the running app via `/preview/<id>/…`, NOT DataGOL directly** — the whole
+point is to exercise client → `/api/*` → Express → DataGOL end-to-end. Set
+`P=${API_URL}/preview/<sessionId>` for the snippets below.
+
+### Check 1: Build passes (client + server)
 
 ```bash
-cd <sandbox-cwd> && npx tsc --noEmit 2>&1
+cd <sandbox-cwd> && npm run build 2>&1     # vite build (client) + tsc (server)
 ```
 
-Pass: exit code 0, no output.
-Fail: any `error TS####` lines. Each line is `path/file.ts(LINE,COL): error TSxxxx: <message>`.
+Pass: exit 0. Fail: any `error TS####` or vite build error. **Auto-fix:** read the
+named file/line, apply a targeted fix (the message says exactly what's wrong),
+rebuild; up to 3 attempts. A red build = NOT ready, full stop.
 
-**Auto-fix protocol:**
-- Read the file at the named line.
-- Apply a targeted fix — never refactor the whole file. The TS message tells you *exactly* what's wrong (*"Property 'X' does not exist on type 'Y'"*, *"Cannot find module 'Z'"*, *"Type 'string' is not assignable to type 'number'"*).
-- Re-run `tsc --noEmit`. If still failing, attempt 2; up to 3 attempts total.
-
-### Check 2: Preview is reachable
-
-Get the preview URL from the most recent `sandbox_ready` event in the transcript, or read `${API_URL}/preview/${sessionId}/` from the cli-server.
+### Check 2: App server is up + UI loads
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}" "<previewUrl>"
+curl -s -o /dev/null -w "ui=%{http_code}\n" "$P/"            # built React index.html
+curl -s -o /dev/null -w "health=%{http_code}\n" "$P/api/health"
 ```
 
-Pass: `200`.
-Fail: `502` (Vite crashed), `503` (Vite still starting — wait 2s and retry once), any other status.
+Pass: both `200`. Fail: `502`/`503` = the Express server crashed or is still
+building (wait 2s, retry once; if still down, read the `[app:…]` stderr and patch
+the **source** cause, then let the auto-rebuild restart it — do NOT launch the
+server yourself; see "Process model" above). **`/api/health` is NOT proof the app works** — it never touches
+DataGOL. It only proves the server booted. Continue to Check 3.
 
-**Auto-fix protocol:**
-- If `502` and the Vite dev server log mentions a syntax error or missing import, locate the file from the error and patch it.
-- If `503` after retry, give up — Vite needs more time; surface to user.
-- If anything else, surface verbatim.
+### Check 3: A REAL data endpoint returns 200 (the check that actually matters)
 
-### Check 3: Per-workbook read probe
-
-For each workbook the generated app references (look in `src/lib/api.ts` or `src/config.ts` for hard-coded `WORKBOOK_ID` / `TABLE_ID` constants — the build skills require these to be hard-coded), run a cursor read against DataGOL. **Use the same auth header the generated app uses** — `x-auth-token: $DATAGOL_SERVICE_TOKEN` if a service token was provisioned, else `Authorization: Bearer $DATAGOL_TOKEN`:
+For **each** `/api/<resource>` the app exposes (read `server/src/routes/`), call
+the **read** endpoint through the preview:
 
 ```bash
-curl -s -X POST "${DATAGOL_BASE_URL}/noCo/api/v2/workspaces/${WS_ID}/tables/${WB_ID}/cursor" \
-  -H "x-auth-token: ${DATAGOL_SERVICE_TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d '{"requestPageDetails":{"pageNumber":1,"pageSize":1}}' \
-  -w "\n---STATUS:%{http_code}"
+curl -s -o /dev/null -w "%{http_code}" "$P/api/<resource>"   # e.g. /api/products
 ```
 
-Pass: status `200` and JSON body parseable.
-Fail: any 4xx/5xx — quote the response body, it's almost always descriptive (*"workbook not found"*, *"permission denied"*, *"cellValues must not be null"*).
+Pass: `200` with a JSON body. **Fail: `401`/`500`/`undefined`-in-URL → the app is
+NOT ready**, even though `/api/health` was green. This is the single most
+important check — it proves the server's DataGOL wiring (service token, workspace
+id, table ids) is actually populated and valid.
 
-**Auto-fix protocol:**
-- `404 workbook not found` → the hard-coded ID in api.ts is wrong; call `datagol_get_workspace_schema` to find the correct one, patch the constant.
-- `403 permission denied` → the service account wasn't granted access to the workspace. Re-run the `datagol-app-auth` Step C (grant `CREATOR` via `bulkUsers`).
-- `401` → service token is missing/wrong; check `.env.local`.
-- Anything else, surface to user.
+**Auto-fix protocol — diagnose by status:**
+- **`401` on `/api/<resource>` but `/api/health` is 200** → the server's
+  **`DATAGOL_SERVICE_TOKEN` is missing/empty/wrong** in `server/.env`, OR a
+  **user bearer (`DATAGOL_TOKEN`) was used where a service token is required**.
+  The codex injects `DATAGOL_TOKEN` (a *user* bearer) — it is **not** a service
+  token. You must **provision the service token and populate `server/.env`** per
+  `datagol-app-auth` (Steps A/B/C + the "populate server/.env" step). Then rebuild
+  (the after-turn rebuild picks up `.env`) and re-probe.
+- **`undefined` in the request URL / `500` "workspace/table not found"** → a
+  `*_TABLE_ID` is missing from `server/.env`. Get the real ids from
+  `datagol_get_workspace_schema` and write them into `server/.env`. **Do NOT add
+  `DATAGOL_WORKSPACE_ID`** — the workspace is resolved at runtime from the service
+  token via `getWorkspaceId()` (see `datagol-app-backend`); a baked id is a bug,
+  not a fix. If the resolver throws "resolves to no workspace", the service
+  account grant is missing → that's the `403` case below (Step C).
+- **`403`** → the service account lacks workspace access; re-run `datagol-app-auth`
+  Step C (`bulkUsers` grant `CREATOR`).
+- After any env change, confirm `server/.env` actually contains non-empty
+  `DATAGOL_SERVICE_TOKEN`, `DATAGOL_APP_ID`, and every `*_TABLE_ID` — an empty
+  `.env` (just `PORT`) is the #1 cause of this failure. (`DATAGOL_WORKSPACE_ID`
+  is intentionally absent — resolved from the token, not baked.)
 
-### Tier 1 output format
+### Check 4: Auth round-trip (Mode 2 / Mode 3 apps only)
 
-Print **one** tight block. Don't narrate each individual check unless it failed:
+If the app has login (interview §3 = Mode 2 or 3), prove the gate works:
+
+```bash
+curl -s -o /dev/null -w "protected_no_auth=%{http_code}\n" "$P/api/<protected-resource>"   # expect 401
+# happy-path login returns a token / sets a session:
+curl -s -o /dev/null -w "login=%{http_code}\n" -X POST "$P/api/auth/login" \
+  -H 'Content-Type: application/json' --data '{"username":"<seed-or-test-user>","password":"<pw>"}'
+```
+
+Pass: protected route **401 without auth**, login **200** (and an authed call to a
+protected route returns 200). Fail → auth isn't wired; NOT ready. (If there's no
+seeded test user yet, state that the login path is unverified and say so in the
+block — don't claim auth works.)
+
+### Tier 1 output format — the MANDATORY evidence block
+
+Unlike before, this is **not silent on pass** — the block is the *proof* the
+completion gate requires. Paste it with the **actual** status codes you observed
+(not from memory — from the commands you just ran). Only after an all-green block
+may you tell the user the app is ready.
+
+All-green (you MAY now say "ready"):
 
 ```
-🧪 Sanity checks
-✓ TypeScript compiles
-✓ Preview is live
-✓ All 4 workbook reads succeed
+🧪 Verification
+✓ build           npm run build → exit 0
+✓ server + ui     ui=200  health=200
+✓ data endpoints  /api/products=200  /api/orders=200  /api/categories=200
+✓ auth            protected_no_auth=401  login=200        (Mode 2/3 only)
 
-App is ready.
+App is ready. Open the preview.
 ```
 
-On a failure that was auto-patched:
+After an auto-fix (show what broke + the fix, then the green re-run):
 
 ```
-🧪 Sanity checks
-✓ TypeScript compiles
-✗ Preview was failing — `Cannot find module './pages/Customers'` in src/App.tsx:8
-  → Patched src/App.tsx:8 (import path was missing /index)
-✓ Preview is live (retry)
-✓ All 4 workbook reads succeed
+🧪 Verification
+✓ build
+✗ data endpoints  /api/products=401 (health was 200) → server .env had no
+  DATAGOL_SERVICE_TOKEN. Provisioned a service account + token, granted CREATOR,
+  wrote SERVICE_TOKEN + *_TABLE_ID into server/.env (workspace resolved from the
+  token, not baked), rebuilt.
+✓ data endpoints  /api/products=200  /api/orders=200  (retry)
 
-App is ready.
+App is ready. Open the preview.
 ```
 
-On a failure that exhausted 3 attempts:
+Failure that couldn't be fixed (you MUST NOT say "ready"):
 
 ```
-🧪 Sanity checks
-✓ TypeScript compiles
-✗ Workbook reads — Contacts (id `xyz...`) returns 404 "workbook not found"
-  Attempted fixes (3):
-    1. Re-read schema, replaced ID — still 404
-    2. Looked for typo in WORKSPACE_ID — none found
-    3. Re-fetched workspace schema fresh — workbook genuinely missing
+🧪 Verification
+✓ build
+✗ data endpoints  /api/products=401 after 3 attempts
+    1. Populated server/.env with provisioned service token — still 401
+    2. Re-granted CREATOR on the workspace — still 401
+    3. Verified token against /noCo/api/v2/workspaces directly — 401 there too
 
-The Contacts workbook doesn't seem to exist in the workspace. Did the create
-call fail silently, or was it deleted? Want me to recreate it?
+The service token isn't authenticating against this backend. The app is **not
+ready** — data calls fail. <next step / question for the user>
 ```
+
+Note the second example is the **exact class of bug** that previously shipped as
+"ready": `/api/health` green but `/api/products` 401 because `server/.env` had no
+service token. Check 3 + this block make that impossible to miss.
 
 ---
 
@@ -284,7 +384,14 @@ Inherits from `datagol-data-query`:
 
 ## Hard rules
 
-- **Tier 1 is silent on pass.** Don't celebrate ✓✓✓ when nothing was broken — one tight summary line is enough.
+- **NEVER hand-manage the server process.** No `node server/dist/index.js`, no
+  `npm run dev/start`, no manual `kill`. The platform auto-rebuilds + restarts
+  on `agent_done`. Hand-spawning creates stale orphan processes — the root
+  cause of phantom 404/hang symptoms. See "Process model" above. Corollary:
+  never add header-based / no-body login hacks to dodge a fake "JSON POST
+  hangs through the proxy" problem — it doesn't; you were hitting a stale
+  process.
+- **Tier 1 is a GATE, not a silent check.** Always paste the evidence block (above) before any completion statement — the block IS the permission to say "ready". A pass is not "silent" anymore; the proof must be shown. (Keep it to the one tight block — don't narrate each curl beyond that.)
 - **Tier 1 is autonomous on fail.** Don't ask the user permission to fix a missing import or wrong workbook ID — just fix it. Surface the trail (one line per attempt), not a confirmation dialog.
 - **Tier 2 is never autonomous.** Always ask before running. Always show every step's network log when running — the whole point of opting in is to see the trace.
 - **Don't run tests on read-only turns.** If the agent didn't modify anything in the most recent turn, skip. Re-running checks after every clarification question is annoying.
@@ -295,7 +402,7 @@ Inherits from `datagol-data-query`:
 ## Cross-references
 
 - **`datagol-detailed-plan`** — §8 (Test & Verification) is the source-of-truth for which read-only endpoints to probe. This skill operationalises that section: instead of telling the user *"you can curl this"*, the agent runs it.
-- **`datagol-ui-generation`** — defines the "hard-code real workspace + workbook IDs" rule. This skill's read probe verifies those IDs actually exist.
+- **`datagol-app-development`** — defines the "hard-code real workspace + workbook IDs" rule. This skill's read probe verifies those IDs actually exist.
 - **`datagol-app-auth`** — the service-token provisioning the read probe authenticates with. If the probe fails with 401, this is the path to re-check.
 - **`datagol-data-query`** — composition rules (prose first, network errors verbatim) come from here.
 - **`datagol-create-agent`** — Phase C will add an "agent round-trip" Tier 2 check that drives a created agent's chat with a canned prompt.

@@ -5,7 +5,7 @@ description: Register an external **data source** with DataGOL — SQL (Postgres
 
 # DataGOL Data Connector — Register a Data Source
 
-This skill is the *external-data-source* counterpart of `datagol-connector`. When the user says *"connect my Postgres"*, *"register my MSSQL warehouse"*, *"connect HubSpot"*, etc., the agent does **two HTTP POSTs** — register the source, then sync its schema so the streams become queryable. Nothing else.
+When the user says *"connect my Postgres"*, *"register my MSSQL warehouse"*, *"connect HubSpot"*, etc., the agent does **two HTTP POSTs** — register the source, then sync its schema so the streams become queryable. Nothing else.
 
 It pairs with a **provider reference file** alongside this skill (e.g. `reference/postgres.md`, `reference/hubspot.md`) that supplies provider-specific defaults — driver name / endpoint URL, default port, the field set to ask for, type=SQL vs type=REST. The parent (this skill) owns the API call shape and the credential-handling rules.
 
@@ -26,22 +26,11 @@ Redshift, BigQuery, etc.), confirm with them — we may not have a
 reference yet and should fall back to the parent's generic flow plus
 writing a new reference file at the end.
 
-## How this differs from `datagol-connector`
-
-| | `datagol-connector` | `datagol-data-connector` |
-|---|---|---|
-| Use case | OAuth-based SaaS APIs (Gmail, Slack, …) | Direct SQL databases (Postgres, MSSQL, …) |
-| Credential model | OAuth → backend token broker | User types DB username + password into chat; agent POSTs once |
-| Setup endpoint | `/idp/api/v1/oauth2/{service}/authorize` | `POST /dataSources/api/v1/dataSources` |
-| Scaffolding by default | None (creates a connector row in a workbook only when wiring an app) | None |
-
-If the user asks to "connect a database" / "import data from SQL" / "wire up Postgres" — that's this skill. If they ask "connect Slack" / "sync my inbox" — that's `datagol-connector`.
-
 ## When to use (and when not to)
 
 - Use when the user wants DataGOL to know about their SQL database: Postgres, MSSQL, MySQL/MariaDB, Snowflake, Redshift, BigQuery, etc.
 - Use alongside the matching provider reference file (`reference/postgres.md`, `reference/hubspot.md`, future `mssql.md`, …) for provider-specific defaults.
-- **Do not** use this skill for OAuth-based APIs — that's `datagol-connector`.
+- **Do not** use this skill for OAuth-based SaaS APIs (Gmail, Slack, Notion, etc.) — that's `datagol-app-connector` (Composio-backed).
 - **Do not** use this skill for static data the user pastes in — that's `datagol-create-links` / `datagol-workbook-design`.
 
 ## The default flow — register a data source
@@ -155,7 +144,7 @@ If — and only if — the user explicitly asks to build a generated app/UI/dash
 In that case, do the registration flow above, **and additionally** route through the existing app-building skills:
 
 - **`datagol-app-auth`** — provisions a service token + `.env.local` so the generated app authenticates as a service account, not the user.
-- **`datagol-ui-generation`** — scaffolds the actual app UI. If the user wants a "data sources" picker, this is where the workbook-listing UI is generated.
+- **`datagol-app-development`** — scaffolds the actual app UI. If the user wants a "data sources" picker, this is where the workbook-listing UI is generated.
 - **`datagol-create-dashboard`** — for dashboards over query results.
 
 The `Data Connectors` workbook concept — a per-workspace workbook that stores a row per registered data source so the generated app can list them — only earns its weight when there's a generated app that needs to enumerate sources. **Don't create it during the default flow.** When you do create it (in Flow B), you're just calling `datagol_create_workbook` with whatever columns the app actually needs — it isn't part of this skill's contract.
@@ -212,6 +201,6 @@ The `Data Connectors` workbook concept — a per-workspace workbook that stores 
 - **`reference/hubspot.md`** (alongside this skill) — HubSpot REST data source defaults + private app token handling. Read on demand.
 - **`datagol-data-query`** — operation child: schema → SQL → execute → render result inline. Use when the user wants to run an ad-hoc SQL query against a registered data source.
 - **`datagol-data-publish`** — operation child: SQL → materialized-view workbook via `/publishTable`. Use when the user wants to *save* the query result as a workbook for ongoing use.
-- **`datagol-connector`** — the OAuth-based connector parent. Sister skill family for SaaS APIs (not databases).
-- **`datagol-ui-generation`**, **`datagol-app-auth`**, **`datagol-create-dashboard`** — only relevant in Flow B (when the user is also building an app on top of the data source).
+- **`datagol-app-connector`** — Composio-backed integration for OAuth SaaS APIs (Gmail, Slack, Notion, GitHub, …). Different family — use that when the user wants to *act on* a SaaS provider from a generated app, not ingest SQL data.
+- **`datagol-app-development`**, **`datagol-app-auth`**, **`datagol-create-dashboard`** — only relevant in Flow B (when the user is also building an app on top of the data source).
 - **`datagol-workbook-operations`** — once `datagol-data-publish` lands a workbook, this is how the generated app reads rows from it.

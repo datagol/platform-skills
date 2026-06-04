@@ -7,6 +7,15 @@ description: Full reference for DataGOL workbook operations — listing, queryin
 
 This skill covers everything you can do **inside a workbook** via the DataGOL REST API: query and paginate rows, fetch a row by id, add/update/delete rows (single and bulk), and create/update/delete columns (including AI columns).
 
+> **Endpoint reference — topology-neutral. Mind who's calling (see
+> `datagol-app-development` §Build-time vs runtime):** when the **codex agent**
+> uses these endpoints to scaffold/seed/verify at build time, it calls DataGOL
+> **directly** (operator bearer / service token). When a **generated app** uses
+> them at runtime, the call lives **server-side in the Express API** (`dgFetch`
+> with the token + `x-appid` from env) and the browser reaches it via `/api/*` —
+> never directly. The payloads/endpoints below are the same either way; only the
+> caller and host differ.
+
 For **creating workbooks** and **shaping the schema** (relationships, design choices), use:
 - `datagol_create_workbook` tool + `datagol-workbook-design` skill — to scaffold a new workbook.
 - `datagol_add_column` tool + `datagol-create-links` skill — to add scalar columns or LINK columns.
@@ -26,7 +35,7 @@ Authorization: Bearer eyJhbGciOi...
 Content-Type: application/json
 ```
 
-Inside the Pi extension, reuse `process.env.DATAGOL_TOKEN`. Inside generated chat / CRUD apps, the user pastes their token (`localStorage.DATAGOL_TOKEN`) — see the `datagol-ui-generation` and `datagol-agent-chat-ui` skills.
+Inside the Pi extension, reuse `process.env.DATAGOL_TOKEN`. Inside generated chat / CRUD apps, the user pastes their token (`localStorage.DATAGOL_TOKEN`) — see the `datagol-app-development` and `datagol-agent-chat-ui` skills.
 
 ## Base URL
 
@@ -528,5 +537,5 @@ Skipping step 3 is the single most common cause of `Validation failed` on update
 - **`datagol-workbook-design`** — when designing the workbook itself (column choice, types, naming).
 - **`datagol-create-links`** — when adding LINK columns / building relationships.
 - **`datagol-context`** — DataGOL data model (Workspace → Workbook → Column / Row).
-- **`datagol-ui-generation`** — when building a CRUD UI on top of these endpoints.
+- **`datagol-app-development`** — when building a CRUD UI on top of these endpoints.
 - **`datagol-human-in-the-loop`** — what to gate before mutating rows or schema.

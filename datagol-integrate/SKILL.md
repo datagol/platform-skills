@@ -1,13 +1,13 @@
 ---
 name: datagol-integrate
-description: Orientation skill for adding DataGOL agents (chat UI, dashboard, RAG) into an existing user codebase that was opened via "Open repo from GitHub". Use this whenever the sandbox already contains a real `package.json` (i.e., not the blank Vite template) — covers framework detection, picking the right route/mount point, respecting existing styling, and not breaking the user's build. Pairs with `datagol-agent-chat-ui`, `datagol-create-dashboard`, `datagol-create-agent`, and `datagol-ui-generation` — those skills tell you *what* to scaffold; this one tells you *how* to graft it onto an existing app.
+description: Orientation skill for adding DataGOL agents (chat UI, dashboard, RAG) into an existing user codebase that was opened via "Open repo from GitHub". Use this whenever the sandbox already contains a real `package.json` (i.e., not the blank Vite template) — covers framework detection, picking the right route/mount point, respecting existing styling, and not breaking the user's build. Pairs with `datagol-agent-chat-ui`, `datagol-create-dashboard`, `datagol-create-agent`, and `datagol-app-development` — those skills tell you *what* to scaffold; this one tells you *how* to graft it onto an existing app.
 ---
 
 # Integrating DataGOL into an existing app
 
 You're operating inside a sandbox that was checked out from a user's real GitHub repo (look for a `.git/` directory, a `.datagol-project.json` whose `source === "github"`, or a non-template `package.json`). **Do not assume a blank canvas.** The user wants DataGOL features grafted onto their existing app, with their existing build, framework, routing, and styling. Your job is to integrate, not regenerate.
 
-This is an *orientation* skill. The actual scaffolds for chat UIs, dashboards, RAG, and CRUD apps live in their own skills (`datagol-agent-chat-ui`, `datagol-create-dashboard`, `datagol-create-agent`, `datagol-ui-generation`). When any of those skills come up in an existing-codebase context, follow this skill's rules for *how* to apply them.
+This is an *orientation* skill. The actual scaffolds for chat UIs, dashboards, RAG, and CRUD apps live in their own skills (`datagol-agent-chat-ui`, `datagol-create-dashboard`, `datagol-create-agent`, `datagol-app-development`). When any of those skills come up in an existing-codebase context, follow this skill's rules for *how* to apply them.
 
 ## First: read the codebase before writing anything
 
@@ -108,6 +108,6 @@ When you finish, summarize:
 - **`datagol-agent-chat-ui`** — the chat UI scaffold. Apply this skill's rules when grafting it onto an existing app.
 - **`datagol-create-dashboard`** — the dashboard scaffold. Same.
 - **`datagol-create-agent`** — the agent creation flow (including RAG). The agent itself is server-side; the chat UI for end users is client-side and uses `datagol-agent-chat-ui`.
-- **`datagol-ui-generation`** — generic CRUD UI patterns. Apply this skill's rules when adding to an existing app.
+- **`datagol-app-development`** — generic CRUD UI patterns. Apply this skill's rules when adding to an existing app.
 - **`datagol-upload-file`** / **`datagol-index-document`** — RAG building blocks. The UIs they scaffold should also follow this skill's rules in an existing-app context.
 - **`datagol-workbook-operations`** — workbook read/write API reference; framework-agnostic.

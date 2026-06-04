@@ -4,7 +4,7 @@ Background notes captured while designing `datagol-app-auth`, `datagol-connector
 
 ## Existing skills inventory (`server/skills/`)
 
-`datagol-agent-chat-ui`, `datagol-user-auth`, `datagol-create-agent`, `datagol-create-dashboard`, `datagol-create-links`, `datagol-context`, `datagol-deploy-to-vercel`, `datagol-detailed-plan`, `datagol-download-code`, `datagol-frontend-design`, `datagol-human-in-the-loop`, `datagol-index-document`, `datagol-integrate`, `datagol-interview`, `datagol-push-to-github`, `datagol-ui-generation`, `datagol-upload-file`, `datagol-workbook-design`, `datagol-workbook-operations`. None currently use a `datagol-` prefix; renaming all of them is a flagged follow-up workstream.
+`datagol-agent-chat-ui`, `datagol-user-auth`, `datagol-create-agent`, `datagol-create-dashboard`, `datagol-create-links`, `datagol-context`, `datagol-deploy-to-vercel`, `datagol-detailed-plan`, `datagol-download-code`, `datagol-frontend-design`, `datagol-human-in-the-loop`, `datagol-index-document`, `datagol-integrate`, `datagol-interview`, `datagol-push-to-github`, `datagol-app-development`, `datagol-upload-file`, `datagol-workbook-design`, `datagol-workbook-operations`. None currently use a `datagol-` prefix; renaming all of them is a flagged follow-up workstream.
 
 Closest analogues for shape and length:
 
@@ -24,7 +24,7 @@ Closest analogues for shape and length:
 
 ## Workbook & workspace API surface
 
-Base URL: `https://be.datagol.ai/noCo/api/v2` (or `https://testing-be.datagol.ai/noCo/api/v2` in test). New auth header for generated apps: **`x-auth-token: <SERVICE_TOKEN>`** — replaces the legacy `Authorization: Bearer ${DATAGOL_TOKEN}` from `localStorage`.
+Base URL: `https://be.datagol.ai/noCo/api/v2` (or `https://testing-gcp-be.datagol.ai/noCo/api/v2` in test). New auth header for generated apps: **`x-auth-token: <SERVICE_TOKEN>`** — replaces the legacy `Authorization: Bearer ${DATAGOL_TOKEN}` from `localStorage`.
 
 - `POST /workspaces/{wsId}/tables/{wbId}/rows` — single insert; body wrapped in `{ "cellValues": {...} }`.
 - `POST /workspaces/{wsId}/tables/{wbId}/rows/bulk` — atomic bulk insert; body is a JSON array of `{ cellValues }` objects.
@@ -47,7 +47,7 @@ After Step 3, the generated app uses `x-auth-token: <SERVICE_TOKEN>` for every D
 | Env  | Backend                           | Frontend                          |
 |------|-----------------------------------|-----------------------------------|
 | prod | `https://be.datagol.ai`           | `https://app.datagol.ai`          |
-| test | `https://testing-be.datagol.ai`   | `https://testing.datagol.ai`      |
+| test | `https://testing-gcp-be.datagol.ai`   | `https://testing.datagol.ai`      |
 
 API paths are identical between envs. **Default `prod`.** Codex switches to `test` only on explicit user phrases ("build in test", "use the test environment", "target testing"). Choice baked into `src/config.ts` as `DATAGOL_ENV` + `DATAGOL_BASE_URL`. Codex announces the picked env at the end of scaffolding so the user can redirect with one phrase.
 
@@ -126,7 +126,7 @@ These are flagged as placeholders inside the skill text and should be confirmed 
 ## Follow-up workstreams (not in the initial three skills)
 
 - Rename existing skills to `datagol-*` (e.g. `datagol-agent-chat-ui` → `datagol-agent-chat-ui`). Touches every skill's cross-references and any code that references skill names by string.
-- Update existing skills (`datagol-workbook-operations`, `datagol-ui-generation`, `datagol-agent-chat-ui`, `datagol-create-dashboard`, `datagol-user-auth`) to reference `datagol-app-auth` and stop documenting bearer-from-localStorage as the default for generated apps.
+- Update existing skills (`datagol-workbook-operations`, `datagol-app-development`, `datagol-agent-chat-ui`, `datagol-create-dashboard`, `datagol-user-auth`) to reference `datagol-app-auth` and stop documenting bearer-from-localStorage as the default for generated apps.
 - Future child skills: `datagol-microsoft-connector` (Outlook + Microsoft Calendar + OneDrive), `datagol-slack-connector`, `datagol-salesforce-connector`. Each is a child of `datagol-connector`.
 - A way to surface the generated app's port for the OAuth client's `javascript_origins` if we ever add direct browser OAuth (we deliberately didn't — this is hypothetical).
 - A backend-side scheduler so polling can run while the generated app's page is closed. Out of scope for the initial three skills; flagged loudly to the user at scaffold time.

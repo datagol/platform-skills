@@ -5,6 +5,15 @@ description: Create a dashboard page in a generated React app by embedding an ex
 
 # Create a Dashboard Page
 
+> **Runtime skill — DataGOL access goes through the app's API.** This embeds a
+> DataGOL BI dashboard in the **generated app**, so it is **runtime**. The
+> **embed token must be obtained from the app's `/api`** (the Express server
+> mints/returns it using the server-side service token) — **never bake a service
+> token into the client** for `window.DataGOL.init`. `embed.js` itself runs in the
+> browser, but the token it receives comes from a same-origin `/api/*` call. Any
+> other DataGOL data the dashboard page needs goes through `/api/*` too. See
+> `datagol-app-development` §Build-time vs runtime.
+
 Use this when the user asks to add a dashboard to a generated app. The skill dynamically loads `embed.js` and calls `window.DataGOL.init(...)` with the user-supplied config. **Always run the interview below first** to collect the required values before writing any files.
 
 > **In an existing user codebase?** If the sandbox was opened via "Open repo from GitHub" (project config has `source: 'github'`), read the **`datagol-integrate`** skill first. The Dashboard component shape below stays the same; the routing and styling wiring follows the host project's conventions.
@@ -208,6 +217,6 @@ Do not mention `appId`, `pageId`, token values, embed script URLs, or UUIDs.
 ## Cross-references
 
 - **`datagol-agent-chat-ui`** — conversational UI pattern for DataGOL agents.
-- **`datagol-ui-generation`** — full CRUD apps over workbooks; use when the user wants to *edit* data, not just view a dashboard.
+- **`datagol-app-development`** — full CRUD apps over workbooks; use when the user wants to *edit* data, not just view a dashboard.
 - **`datagol-context`** — DataGOL data model and platform terminology.
 - **`datagol-app-auth`** — service token pattern and environment configuration for DataGOL apps.

@@ -78,7 +78,7 @@ landing/marketing/portfolio surface, lean into the maximalist end.
 
 ## Cross-references
 
-- **`datagol-ui-generation`** invokes this skill on every design pass. The CRUD
+- **`datagol-app-development`** invokes this skill on every design pass. The CRUD
   scaffolds it produces still need a real aesthetic; "list/detail/form"
   is the *layout*, not the *design*.
 - **`datagol-detailed-plan`** §2 (UX) is where the aesthetic direction is named

@@ -1,11 +1,25 @@
 ---
 name: datagol-connector
-description: The shared pattern for building any 3rd-party OAuth connector inside a DataGOL-generated app — Gmail, Calendar, Outlook, Slack, Salesforce, Drive, etc. Covers the `Integration Connectors` workbook, the OAuth handoff via the existing DataGOL backend redirect (`/idp/api/v1/oauth2/{service}/authorize`), persisting the `connectorId`, the token-broker contract (`/connector/api/v1/instance/byId/{id}`), the Connections page UI shell, the in-page polling loop, and the generated-app API layer structure. Triggered by "build a connector", "connect <service>", "sync my <inbox|calendar|drive|messages>", or any 3rd-party integration request — including specific phrasings like "build a gmail connector", "connect google", "sync my inbox", "build a google calendar integration", "sync my calendar", "build a google integration", "build a slack connector", "connect slack", "sync my slack", "build a slack integration", "index slack messages". Provider-specific details (scopes, schemas, sync logic) live in reference files alongside this skill: `reference/google.md` (Gmail + Calendar), `reference/slack.md` (channels + messages). Depends on `datagol-app-auth`.
+description: The shared pattern for building any 3rd-party OAuth connector inside a DataGOL-generated app — Gmail, Calendar, Outlook, Slack, Salesforce, Drive, etc. Covers the `Integration Connectors` workbook, the OAuth handoff via the existing DataGOL backend redirect (`/idp/api/v1/oauth2/{service}/authorize`), persisting the `connectorId`, the token-broker contract (`/connector/api/v1/instance/byId/{id}`), the Connections page UI shell, the in-page polling loop, and the generated-app API layer structure. Triggered by "build a connector", "connect <service>", "sync my <inbox|calendar|drive|messages>", or any 3rd-party integration request. Provider-specific scaffolds live in child skills like `datagol-google-connector` (Gmail + Calendar). Depends on `datagol-app-auth`.
 ---
 
 # DataGOL Connector (parent pattern)
 
-This skill defines the *shape* of every DataGOL connector — what every Gmail, Calendar, Outlook, Slack, or Salesforce integration looks like before you fill in provider-specific details. It pairs with a **provider reference file** alongside this skill (e.g. `reference/google.md`) that supplies the provider's URLs, scopes, data schemas, and sync logic.
+> **Runtime skill — DataGOL access goes through the app's API.** Connectors
+> **ship and run in the generated app**, so they are **runtime**. Under the
+> single-port model, the connector machinery moves **server-side**: OAuth start,
+> the token broker (`/connector/api/v1/instance/byId/{id}`), the
+> `Integration Connectors` workbook reads/writes, and provider polling all run in
+> the Express API; the browser only calls the app's **`/api/*`** (e.g.
+> `/api/connectors`, `/api/connectors/:id/sync`). The service token never reaches
+> the client. The OAuth *redirect* still goes through the browser, but the
+> `clientRedirectUri` lands on an app route that hands the `connectorId` to the
+> server. Where samples below call DataGOL/the broker/provider from the client,
+> place them in `server/`. See `datagol-app-development` §Build-time vs runtime.
+> *(This also unblocks always-on/background sync, since the sync logic is no
+> longer trapped in a browser tab.)*
+
+This skill defines the *shape* of every DataGOL connector — what every Gmail, Calendar, Outlook, Slack, or Salesforce integration looks like before you fill in provider-specific details. It pairs with a child skill (e.g. `datagol-google-connector`) that supplies the provider's URLs, scopes, data schemas, and sync logic.
 
 > **Read `datagol-app-auth` first.** This skill assumes a service token in `x-auth-token`, the `DATAGOL_BASE_URL` config constant, and the `dgFetch` helper. None of that is repeated here.
 
@@ -13,25 +27,8 @@ This skill defines the *shape* of every DataGOL connector — what every Gmail, 
 
 - The user asks for a 3rd-party data sync — Gmail, Calendar, Outlook, Drive, Slack, Salesforce, etc.
 - The user is wiring a "Connections" or "Integrations" page (like the screenshot with Email / Calendar / Storage groups).
-- A reference file exists for the provider (`reference/google.md`, `reference/slack.md`, future `microsoft.md`, etc.) — **read it immediately after this SKILL.md.** The reference file supplies provider-specific bits; this parent supplies the shared mechanics.
-- No reference file exists yet — use this skill alone, work off placeholders for provider-specific parts (OAuth scopes, API URLs, row schemas), and **write a new reference file afterwards** so the next person doesn't reinvent the same shape.
-
-## Provider references
-
-When the user names a provider, immediately read the matching reference
-**before doing anything else** — it carries the scopes, paths, schemas,
-backfill logic, polling semantics, and parser bits this parent doesn't
-repeat. Use the `Read` tool with the relative path from this folder.
-
-| User mentions | Read |
-| --- | --- |
-| Gmail, Calendar, "sync my inbox", "sync my calendar", "google integration", `gmail.google.com`, `calendar.google.com` | `reference/google.md` |
-| Slack, Slack channels/messages, slack workspace, slack.com URL, "index slack" | `reference/slack.md` |
-
-If the user names a provider not in this table (Outlook, Drive,
-Salesforce, etc.), confirm with them — we may not have a reference yet
-and should fall back to the parent's generic flow plus writing a new
-reference file at the end.
+- A child skill exists for the provider (`datagol-google-connector`, future `datagol-microsoft-connector`, etc.) — load both. The child supplies provider-specific bits; this parent supplies the shared mechanics.
+- No child skill exists yet — use this skill alone, work off placeholders for provider-specific parts (OAuth scopes, API URLs, row schemas), and **write a new child skill afterwards** so the next person doesn't reinvent the same shape.
 
 ## The connector loop (one-page architecture)
 
@@ -61,28 +58,28 @@ GET /idp/api/v1/oauth2/{service}/authorize?clientRedirectUri=<this URL>
    2. history.replaceState — scrub query
    3. getTokens(connectorId) → { accessToken, refreshToken, expiresAt, accountEmail, ... }
    4. PATCH connector row with account_email
-   5. hand off to provider reference: backfill (last 30 days)
+   5. hand off to child skill: backfill (last 30 days)
         │
         ▼
 [60s poller, while page is open]
    reads `Integration Connectors` workbook every cycle
-   for each connected row → provider reference's syncOne(connectorRow):
+   for each connected row → child skill's syncOne(connectorRow):
      - getTokens(connectorRow.connector_id)
      - call provider API for delta since cursor_json
      - dedupe + bulk-insert into the data workbook
      - advance cursor_json AFTER successful insert
 ```
 
-The provider reference's job is to supply: scopes, provider API URLs, data-row schemas, `syncOne()` implementation, and `cursor_json` shape. Everything else here applies unchanged.
+The child skill's job is to supply: scopes, provider API URLs, data-row schemas, `syncOne()` implementation, and `cursor_json` shape. Everything else here applies unchanged.
 
 ## Pre-flight checklist
 
 Before scaffolding any connector code, in this order:
 
-1. **Run `datagol-app-auth` provisioning** — create service account, mint token, drop it into `.env.local`. The provider reference can't bulk-insert workbook rows without it.
+1. **Run `datagol-app-auth` provisioning** — create service account, mint token, drop it into `.env.local`. The child skill can't bulk-insert workbook rows without it.
 2. **Always ask the user which workspace to use before creating any workbooks.** Call `datagol_list_workspaces` to show the user their available workspaces, then explicitly ask: *"Which workspace should I create the workbooks in?"* Never silently pick the default workspace returned by `datagol_get_workspace_schema` — the user must confirm. If they want a new workspace, create it first with `datagol_create_workspace` and use that ID.
 3. **Grant the service account `CREATOR` on the confirmed workspace** — re-run Step C of `datagol-app-auth` provisioning if the workspace differs from the one already granted.
-4. **Discover existing workbooks** with `datagol_get_workspace_schema` on the confirmed workspace. If `Integration Connectors` already exists in this workspace, **reuse it** — don't create a second one. Same for the provider data workbooks (the provider reference's responsibility to check).
+4. **Discover existing workbooks** with `datagol_get_workspace_schema` on the confirmed workspace. If `Integration Connectors` already exists in this workspace, **reuse it** — don't create a second one. Same for the provider data workbooks (the child skill's responsibility to check).
 5. **Announce the polling caveat** to the user upfront, don't bury it: *"sync only runs while this page is open. For always-on sync we'd need a backend job — out of scope for now."*
 
 ## The `Integration Connectors` workbook
@@ -100,14 +97,14 @@ One workbook per workspace. One row per `(account_email, service_type)` pair. Cr
 | `connected_at`             | DATE      | ISO 8601 with tz                                            |
 | `disconnected_at`          | DATE      | nullable                                                    |
 | `last_synced_at`           | DATE      |                                                             |
-| `cursor_json`              | LONG_TEXT | JSON-encoded; provider reference defines per-service shape         |
+| `cursor_json`              | LONG_TEXT | JSON-encoded; child skill defines per-service shape         |
 | `last_error`               | LONG_TEXT | nullable                                                    |
 
 Use `datagol_create_workbook` to create it with these columns. The cursor is a JSON blob so each provider can encode whatever it needs — Gmail uses `{"history_id":"..."}`, Calendar uses `{"sync_token":"...","calendar_id":"primary"}`, future providers will use whatever fits their API. Don't add a per-provider cursor column to the workbook; it'd make schema migrations brittle.
 
 ## OAuth handoff — the 5 shared steps
 
-Every child reuses these. Don't reimplement them in provider references; just call into `src/api/connectors.ts`.
+Every child reuses these. Don't reimplement them in child skills; just call into `src/api/connectors.ts`.
 
 ### 1. Start
 
@@ -120,7 +117,7 @@ GET ${DATAGOL_BASE_URL}/idp/api/v1/oauth2/<servicePath>/authorize
     &clientRedirectUri=<encodeURIComponent(window.location.href)>
 ```
 
-This is a full-page navigation (not a `dgFetch` call) — the browser follows the redirect chain to the provider's consent screen, so we can't set request headers. Identity is carried in the **`?x-auth-token=`** query param (same name as the header used elsewhere). `<servicePath>` is per-provider — the provider reference knows which (`gmail`, `gcalendar`, `slack`, `outlook`, ...).
+This is a full-page navigation (not a `dgFetch` call) — the browser follows the redirect chain to the provider's consent screen, so we can't set request headers. Identity is carried in the **`?x-auth-token=`** query param (same name as the header used elsewhere). `<servicePath>` is per-provider — the child skill knows which (`gmail`, `gcalendar`, `slack`, `outlook`, ...).
 
 > **`?x-auth-token=` MUST be the service token, never a user JWT.** The backend ties each connector to the identity that initiates OAuth. The broker (`GET /connector/api/v1/instance/byId/{id}`) — which the generated app calls later with the `x-auth-token` *header* set to the service token — only returns tokens for connectors owned by that same identity. Mixing a user JWT in OAuth start with a service token in the broker call produces `errorCodes: ["REAUTHENTICATION_REQUIRED"]` from the broker, even immediately after a fresh OAuth flow. **Both calls must use the same identity.** Never scaffold a `DATAGOL_USER_JWT` constant in the generated app's `config.ts` — no flow needs it.
 
@@ -231,8 +228,8 @@ if (connectorId && isSuccess) {
   // STEP 4 — persist FIRST. Before token fetch, before backfill, before anything.
   await insertRow('Integration Connectors', {
     connector_id: connectorId,
-    service_type: <service>,        // provider reference knows this
-    provider: <provider>,           // provider reference knows this
+    service_type: <service>,        // child skill knows this
+    provider: <provider>,           // child skill knows this
     oauth_status: 'connected',
     connected_at: new Date().toISOString(),
   });
@@ -262,7 +259,7 @@ await updateRow('Integration Connectors', { connector_id: connectorId }, {
 });
 ```
 
-Then call the provider reference's backfill function (`backfillGmail(connectorId)`, `backfillCalendar(connectorId)`, etc.) — that's where the provider-specific work begins.
+Then call the child skill's backfill function (`backfillGmail(connectorId)`, `backfillCalendar(connectorId)`, etc.) — that's where the provider-specific work begins.
 
 ## Token broker — `getTokens(connectorId)`
 
@@ -342,7 +339,7 @@ async function syncAll() {
 
   for (const row of connectors) {
     try {
-      // syncOne is provided by the provider reference, dispatched on row.service_type.
+      // syncOne is provided by the child skill, dispatched on row.service_type.
       await syncOne(row);
     } catch (err) {
       console.warn(`[sync] ${row.service_type}/${row.account_email} failed:`, err);
@@ -364,7 +361,7 @@ src/api/workbooks.ts    — listRows, insertRow, bulkInsertRows, updateRow
 src/api/connectors.ts   — startOAuth, getTokens, disconnectConnector, listConnectors
 ```
 
-Plus per-provider client modules added by provider references (`src/api/google.ts` for Gmail/Calendar, future `src/api/microsoft.ts`, etc.).
+Plus per-provider client modules added by child skills (`src/api/google.ts` for Gmail/Calendar, future `src/api/microsoft.ts`, etc.).
 
 Sketch of `connectors.ts`:
 
@@ -594,18 +591,16 @@ const handleDisconnect = async () => {
 - **Always advance the cursor *after* a successful insert batch, never before.** If insert fails, the next poll re-tries from the same cursor and the dedupe step keeps it idempotent. If you advance first and insert fails, you've lost data forever.
 - **Always dedupe** by the provider's stable id (Gmail `message_id`, Calendar `event_id`, etc.) before inserting. Use a small `whereClause` query against the data workbook before bulk-inserting; only insert ids not already present.
 - **Don't backfill more than 30 days without explicit user confirmation.** Provider rate limits are real (Gmail throttles at ~250 quota-units/user/sec) and so is workbook bloat. If the user explicitly asks for "all my mail" or "everything since 2020", confirm out loud, then page through carefully.
-- **Provider buttons that don't have a provider reference yet must render as `disabled`** with a "coming soon" tooltip. Don't build a half-working Microsoft button just because the Google one works.
+- **Provider buttons that don't have a child skill yet must render as `disabled`** with a "coming soon" tooltip. Don't build a half-working Microsoft button just because the Google one works.
 - **Announce the polling caveat upfront.** "Sync only runs while this page is open" is non-obvious to users used to enterprise integrations. Tell them at scaffold time and surface it in the UI (e.g. footer text).
 - **Always use `window.open(url, '_blank')` for OAuth — never `window.location.href` or `window.open(url, '_top')`.** The generated app runs inside a sandbox iframe; OAuth providers block iframe display with `X-Frame-Options: sameorigin`. `_top` navigation is blocked by cross-origin iframe policy. The only working pattern is a new tab (`_blank`) + `localStorage` signal back to the original tab. See the "Sandbox / iframe constraint" section in Step 1 for the complete implementation.
-- **Don't re-emit a status summary after every intermediate step.** Connector scaffolding is a multi-step flow (provision service token → create `Integration Connectors` workbook → wire Connections page → start polling loop → …) and each step may want to confirm. Use **one short prose line per step** (`Created Integration Connectors workbook.`, `Connections page wired.`, `Polling loop scheduled.`) and reserve any `Parameter | Value` summary table for the **final** message — emitted exactly once at the end. Each intermediate text emission lives in its own message item (because tool calls split text items in the chat store), so a re-emitted table renders the whole table again every time — stacking four near-identical tables in the chat. One table at the end, prose in between.
 
 ## Cross-references
 
 - **`datagol-app-auth`** — service-token + env-switching foundations. Required reading.
-- **`reference/google.md`** (alongside this skill) — Gmail + Calendar provider reference. Read on demand.
-- **`reference/slack.md`** (alongside this skill) — Slack channels + messages provider reference. Read on demand.
+- **`datagol-google-connector`** — Gmail + Calendar implementation. The first child of this parent.
 - **`datagol-integrate`** — when grafting the Connections page into an existing user repo. Follows that skill's mounting and styling rules.
 - **`datagol-workbook-operations`** — full reference for the workbook read/write APIs the `workbooks.ts` wrappers call.
-- **`datagol-workbook-design`** — when you need to design or extend the data-row workbooks beyond what a provider reference specifies.
+- **`datagol-workbook-design`** — when you need to design or extend the data-row workbooks beyond what a child skill specifies.
 - **`datagol-frontend-design`** — Connections page styling, button states, dropdowns.
 - **`datagol-context`** — DataGOL data model (Workspace → Workbook → Column / Row).

@@ -5,7 +5,7 @@ description: Generate and execute ad-hoc SQL against a DataGOL-registered data s
 
 # DataGOL Data Query — Generate SQL, Execute, Render
 
-This skill lets the agent answer data questions by writing and running SQL against any data source the user has registered via `datagol-data-connector`. It's an **agent-runtime** skill — the agent itself fetches the schema, generates the SQL, calls the query API, and includes the result in its chat response. It does *not* scaffold a UI in the generated app; for that, use `datagol-data-publish` (creates a queryable workbook) or build a CRUD UI on top of the published workbook with `datagol-ui-generation`.
+This skill lets the agent answer data questions by writing and running SQL against any data source the user has registered via `datagol-data-connector`. It's an **agent-runtime** skill — the agent itself fetches the schema, generates the SQL, calls the query API, and includes the result in its chat response. It does *not* scaffold a UI in the generated app; for that, use `datagol-data-publish` (creates a queryable workbook) or build a CRUD UI on top of the published workbook with `datagol-app-development`.
 
 > **Read `datagol-data-connector` first.** This skill assumes the user has already registered a data source and you have its `data_source_id`. Schema discovery (`getDataSourceSchema`) lives in the parent.
 
@@ -51,7 +51,7 @@ That's the entire response shape. Three blocks, in this order, every time. **Do 
 When **not** to use:
 - The data isn't in a DataGOL-registered SQL source — it's in a workbook. Use `datagol-workbook-operations` instead.
 - The user wants to **save** the result, not just see it. Use `datagol-data-publish`.
-- The user wants to repeatedly query the same shape from a generated app's UI. Publish first, then build a workbook UI with `datagol-ui-generation`.
+- The user wants to repeatedly query the same shape from a generated app's UI. Publish first, then build a workbook UI with `datagol-app-development`.
 
 ## Response composition (read this before generating anything)
 
