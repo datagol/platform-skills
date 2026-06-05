@@ -1,6 +1,6 @@
 ---
 name: datagol-workbook-operations
-description: Full reference for DataGOL workbook operations — listing, querying, and mutating rows, columns, and AI columns via REST. Use this whenever you need to read or write actual workbook data (not just schema).
+description: Full reference for DataGOL workbook operations — listing, querying, and mutating rows, columns, and AI columns via REST. Use this whenever you need to read or write actual workbook data (not just schema), including detecting AI-Generate-enabled columns in the schema and triggering AI enrichment for a specific row + column.
 ---
 
 # Workbook Operations
@@ -448,6 +448,49 @@ Use to rename a column (display title), change its data type, or tweak `colOptio
 
 No body. Removes the column and all cell values in it. Irreversible — confirm with the user before calling.
 
+### Detect an AI column
+
+Two ways to find AI columns, depending on who's asking:
+
+- **Codex agent (the `datagol_get_workspace_schema` tool):** each AI column is flagged directly — the column object carries `aiGenerate: true` plus an `aiSettings` summary (`prompt`, `model`, `webAccess`). Non-AI columns omit these fields. So "which workbook has an AI column?" = scan the tool's output for any column with `aiGenerate: true`. (The tool reads this from the raw schema below and surfaces it for you — no second fetch needed.)
+- **Raw REST (generated apps / direct calls):** a column is AI-Generate-enabled **iff** `column.settings.aiSettings.enabled === true` on the per-table schema (`GET /workspaces/{workspaceId}/tables/{workbookId}`). Note the **workspace-level** tool projects a trimmed column shape, so always read `settings.aiSettings` from the **per-table** endpoint.
+
+Build a name→id map of the AI columns — you need the column **id** to trigger generation:
+
+```ts
+const aiColumns = new Map<string, string>(); // column name → column id
+for (const col of schema.columns) {
+  if (col.settings?.aiSettings?.enabled && col.id) aiColumns.set(col.name, col.id);
+}
+```
+
+The schema also tells you *how* the value is generated — all available without an extra call:
+
+```json
+{
+  "name": "product_research",
+  "id": "898fe2b4-4bf5-4602-b440-91d0e9406233",
+  "uiDataType": "SINGLE_LINE_TEXT",
+  "settings": {
+    "aiSettings": {
+      "enabled": true,
+      "prompt": "Research on product with name--{name}",
+      "model": "gpt-4o",
+      "webAccess": true,
+      "webAccessProvider": "TAVILY"
+    }
+  }
+}
+```
+
+- `prompt` — template string; tokens like `{name}` reference **other columns in the same row** (this is why the trigger call below sends the whole row).
+- `model` — the LLM used. `webAccess` / `webAccessProvider` — whether the backend does live web research before generating.
+
+Pitfalls:
+- Use the **nested** `settings.aiSettings.enabled`, NOT a top-level `settings.enabled` — both can appear in the payload, only the nested one is AI-specific.
+- Always require `col.id` too — without it you can't call the endpoint.
+- AI-enabled is independent of `uiDataType` (an AI column is still `SINGLE_LINE_TEXT`, etc.).
+
 ### Create an AI column
 
 `POST /workspaces/{workspaceId}/tables/{tableId}/column`
@@ -468,6 +511,24 @@ No body. Removes the column and all cell values in it. Irreversible — confirm 
 ```
 
 The AI runs the prompt on every row, with other column values available by name. Pick a small / fast model (`gpt-4o-mini`) unless the user asks for higher quality. Set `webAccess: true` only when the prompt actually needs the live web.
+
+### Trigger AI generation for a row
+
+On-demand enrichment of **one row + one AI column** (the "generate / regenerate" action), as opposed to the automatic regeneration that fires on a row write.
+
+`POST /workspaces/{workspaceId}/tables/{tableId}/{columnId}/aiGenerate`
+
+`{columnId}` is the AI column's id (from the `aiColumns` map in **Detect an AI column**). Send the **entire row** as the body so the backend can interpolate prompt tokens like `{name}`:
+
+```json
+{
+  "id": "<rowId>",
+  "cellValues": { "name": "Acme Corp", "...": "..." },
+  "cellValuesByColumnId": {}
+}
+```
+
+The response returns updated `cellValues`; merge them back into the row (server-side, or in the client grid — caller's choice). Note this is the **only** AI-column endpoint nested under `{columnId}` — the create/update/delete column endpoints are nested under `columns` / `column` instead.
 
 ---
 
@@ -508,6 +569,12 @@ Skipping step 3 is the single most common cause of `Validation failed` on update
 1. Confirm the workbook + the source columns the prompt will reference.
 2. `POST /column` with `settings.aiSettings` populated. Default to `gpt-4o-mini`.
 3. New rows / row updates trigger regeneration automatically.
+
+### "Generate / regenerate the AI value for just this one row"
+
+1. `GET /workspaces/{wsId}/tables/{tableId}` → find the AI columns via `settings.aiSettings.enabled` (see **Detect an AI column**); keep the `columnId`.
+2. `POST /workspaces/{wsId}/tables/{tableId}/{columnId}/aiGenerate` with the full row (`{ id, cellValues, cellValuesByColumnId: {} }`).
+3. Merge the returned `cellValues` back into the row.
 
 ---
 
